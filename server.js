@@ -1,6 +1,7 @@
 // Запуск: node server.js  (нужен Node 18+, зависимости не нужны)
 // Открыть: http://localhost:3000
-// Сигналы через ИИ: GROQ_API_KEY=ключ node server.js  (без ключа работает встроенный анализатор)
+// Сигналы через ИИ: OPENROUTER_API_KEY=ключ node server.js  (без ключа работает встроенный анализатор)
+// Необязательно: OPENROUTER_MODEL=id_модели — своя модель OpenRouter вместо бесплатных
 const http = require('http'), fs = require('fs'), path = require('path');
 
 // Тикеры Yahoo Finance
@@ -234,51 +235,106 @@ function rulesSignal(id, qs, items) {
   return { status: STATUS[side], confidence, reason: parts.join(' ') };
 }
 
-// ИИ-анализ через Groq
+// ИИ-анализ через OpenRouter (основная модель, при сбое — автоматический бесплатный фолбэк)
+// Свою модель можно задать так: OPENROUTER_MODEL=anthropic/claude-3.5-haiku node server.js
+const OR_URL = 'https://openrouter.ai/api/v1/chat/completions';
+const OR_MODELS = (process.env.OPENROUTER_MODEL ? [process.env.OPENROUTER_MODEL] : [])
+  .concat(['meta-llama/llama-3.3-70b-instruct:free', 'openrouter/free']);
 const norm = s => {
   s = String(s || '').toUpperCase();
   return /ПОКУП|BUY|LONG/.test(s) ? 'ПОКУПАТЬ' : /ПРОДА|SELL|SHORT/.test(s) ? 'ПРОДАВАТЬ' : /ЖДА|HOLD|WAIT|NEUTRAL/.test(s) ? 'ЖДАТЬ' : null;
 };
-async function groqSignal(id, qs, items) {
+
+const SYSTEM_PROMPT = `Ты — встроенный финансовый аналитик торгового дашборда. Твоя единственная задача — сопоставлять свежие заголовки новостей (FinancialJuice) с живыми рыночными котировками (DXY, EUR/USD, XAU/USD, BRENT, BTC/USD), отсеивать рыночный шум и выдавать пользователю краткий вердикт по выбранному активу (поле "asset" во входных данных).
+
+Алгоритм:
+1. Прочитай последние заголовки (они на английском) и выдели макроэкономические драйверы: решения ЦБ по ставкам, данные по инфляции и занятости США, запасы нефти, потоки в крипто-ETF, геополитика. Чем меньше minutes_ago, тем важнее заголовок. Заголовки, не влияющие на выбранный актив, — шум, не учитывай их.
+2. Проверь, подтверждает ли текущее движение цены (change_pct_day, day_range_pos) и корреляция с поводырями DXY и BRENT смысл этих новостей. Типичные связи: рост DXY давит на EUR/USD, золото и BTC; рост Brent поддерживает нефтяные активы и инфляционные ожидания; эскалация конфликтов поддерживает золото и нефть; снижение ставок и слабые данные США ослабляют доллар.
+3. Выдай вердикт.
+
+Статус:
+- "ПОКУПАТЬ" или "ПРОДАВАТЬ" — только если новости и график (с учётом DXY и Brent) однозначно смотрят в одну сторону.
+- "ЖДАТЬ" — если значимых новостей нет, они противоречивы, цена их не подтверждает или рынок стоит на месте.
+
+Уверенность (confidence) — целое число от 50 до 95: чем больше факторов совпадает и чем свежее новость, тем выше. Для "ЖДАТЬ" это уверенность в том, что сигнала сейчас нет.
+
+Обоснование (reason) — 2–3 коротких предложения на русском языке для человека: какая именно новость и как влияет на цену прямо сейчас.
+
+Ответь СТРОГО одним JSON-объектом, без markdown и текста вокруг:
+{"status":"ПОКУПАТЬ"|"ПРОДАВАТЬ"|"ЖДАТЬ","confidence":50-95,"reason":"..."}`;
+
+async function aiSignal(id, qs, items) {
   const quotes = {};
-  Object.keys(qs).forEach(i => { quotes[NAME[i]] = { price: +qs[i].price.toFixed(4), change_pct_day: +qs[i].pct.toFixed(3) }; });
+  Object.keys(qs).forEach(i => {
+    const q = qs[i], span = q.hi - q.lo;
+    quotes[NAME[i]] = {
+      price: +q.price.toFixed(4),
+      change_pct_day: +q.pct.toFixed(3),
+      typical_daily_move_pct: VOL[i] || null,
+      day_range_pos: span > 0 ? +((q.price - q.lo) / span).toFixed(2) : null   // 0 = у минимума дня, 1 = у максимума
+    };
+  });
   const now = Date.now() / 1000;
   const body = {
-    model: 'llama-3.3-70b-versatile', temperature: .2, max_tokens: 400, response_format: { type: 'json_object' },
+    temperature: .2, max_tokens: 400,
     messages: [
-      {
-        role: 'system',
-        content: 'Ты опытный макроаналитик. По свежим новостным заголовкам и текущей динамике цен определи краткосрочный сигнал по указанному активу. ' +
-          'Учитывай связи: рост DXY обычно давит на EUR/USD, золото и BTC; рост Brent поддерживает нефтяные активы и инфляционные ожидания; эскалация конфликтов поддерживает золото и нефть. ' +
-          'Свежие заголовки важнее старых. Если фон противоречивый или слабый — ЖДАТЬ. ' +
-          'Ответь ТОЛЬКО JSON без пояснений вокруг: {"status":"ПОКУПАТЬ"|"ПРОДАВАТЬ"|"ЖДАТЬ","confidence":число от 0 до 100,"explanation":"2–3 предложения на русском языке с обоснованием"}.'
-      },
+      { role: 'system', content: SYSTEM_PROMPT },
       {
         role: 'user',
         content: JSON.stringify({
           asset: NAME[id], quotes,
-          headlines: items.map(n => ({ minutes_ago: Math.max(0, Math.round((now - n.t) / 60)), text: n.title }))
+          headlines: items.map(n => ({ minutes_ago: Math.max(0, Math.round((now - n.t) / 60)), text: n.title, related: (n.tags || []).map(t => NAME[t] || t) }))
         })
       }
     ]
   };
-  const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + process.env.GROQ_API_KEY },
-    body: JSON.stringify(body), signal: AbortSignal.timeout(12000)
-  });
-  if (!r.ok) throw new Error('groq ' + r.status);
-  const o = JSON.parse((await r.json()).choices[0].message.content), status = norm(o.status);
-  if (!status || !o.explanation) throw new Error('bad groq answer');
-  return { status, confidence: clamp(Math.round(Number(o.confidence)) || 50, 0, 100), reason: String(o.explanation).trim().slice(0, 600) };
+  let lastErr;
+  for (const model of OR_MODELS) {
+    try {
+      const r = await fetch(OR_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json', Authorization: 'Bearer ' + process.env.OPENROUTER_API_KEY,
+          'HTTP-Referer': 'http://localhost:3000', 'X-Title': 'Verde'
+        },
+        body: JSON.stringify(Object.assign({ model }, body)), signal: AbortSignal.timeout(20000)
+      });
+      if (!r.ok) throw new Error(model + ' ' + r.status);
+      const j = await r.json(), txt = String(j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content || '');
+      const m = txt.match(/\{[\s\S]*\}/);
+      if (!m) throw new Error(model + ': нет JSON в ответе');
+      const o = JSON.parse(m[0]), status = norm(o.status), reason = o.reason || o.explanation;
+      if (!status || !reason) throw new Error(model + ': неверный формат ответа');
+      return {
+        status, confidence: clamp(Math.round(Number(o.confidence)) || 50, 50, 95),
+        reason: String(reason).trim().slice(0, 600), model: j.model || model
+      };
+    } catch (e) { lastErr = e; }           // модель занята или ответила криво — пробуем следующую
+  }
+  throw lastErr;
+}
+
+// Финальные предохранители (для ИИ и для встроенного анализатора одинаково)
+function finalize(id, qs, items, res) {
+  res.confidence = clamp(Math.round(res.confidence) || 50, 50, 95);
+  if (!items.length && res.status !== 'ЖДАТЬ') {
+    return Object.assign(res, { status: 'ЖДАТЬ', confidence: 55, reason: 'Свежих новостей нет, поэтому сигнала нет — лучше подождать.' });
+  }
+  const q = qs[id], p = q && isFinite(q.pct) ? q.pct / (VOL[id] || 1) : 0, d = SIDE[res.status];
+  if (d && d * p < -.25) {     // цена идёт против вердикта — «однозначного» совпадения нет
+    return Object.assign(res, { status: 'ЖДАТЬ', confidence: 60, reason: String(res.reason).slice(0, 450) + ` Но цена движется против этого вердикта (${f2(q.pct)} за день), поэтому лучше подождать.` });
+  }
+  return res;
 }
 
 const SIDE = { 'ПОКУПАТЬ': 1, 'ПРОДАВАТЬ': -1, 'ЖДАТЬ': 0 };
-const TTL_S = 60000, sigCache = new Map(), inflight = new Map();
+// Сигнал пересчитывается не чаще раза в 60 с; если заголовки не менялись — не позже чем раз в 120 с
+const TTL_MIN = 60000, TTL_MAX = 120000, sigCache = new Map(), inflight = new Map();
+const newsKey = () => news.items.map(n => n.title).join('|');
 
 async function signal(id) {
   const hit = sigCache.get(id), now = Date.now();
-  if (hit && now - hit.t < TTL_S && hit.n === news.t) return hit.v;
+  if (hit) { const age = now - hit.t; if (age < TTL_MIN || (age < TTL_MAX && hit.n === newsKey())) return hit.v; }
   if (inflight.has(id)) return inflight.get(id);
   const p = (async () => {
     const qs = {};
@@ -286,21 +342,81 @@ async function signal(id) {
     if (!qs[id]) throw new Error('no quote');
     const items = news.items;
     let res, source = 'rules';
-    if (process.env.GROQ_API_KEY) {
-      try { res = await groqSignal(id, qs, items); source = 'groq'; }
-      catch (e) { console.warn('Groq недоступен, работает встроенный анализатор:', e.message); }
+    if (process.env.OPENROUTER_API_KEY) {
+      try { res = await aiSignal(id, qs, items); source = 'openrouter'; }
+      catch (e) { console.warn('OpenRouter недоступен, работает встроенный анализатор:', e.message); }
     }
     if (!res) res = rulesSignal(id, qs, items);
+    res = finalize(id, qs, items, res);
     const v = {
       id, status: res.status, side: SIDE[res.status], confidence: res.confidence, reason: res.reason,
-      source, model: source == 'groq' ? 'llama-3.3-70b-versatile' : null,
+      source, model: source == 'openrouter' ? res.model : null,
       t: Math.floor(Date.now() / 1000), news_t: Math.floor(news.t / 1000)
     };
-    sigCache.set(id, { t: Date.now(), n: news.t, v });
+    sigCache.set(id, { t: Date.now(), n: newsKey(), v });
     return v;
   })().finally(() => inflight.delete(id));
   inflight.set(id, p);
   return p;
+}
+
+/* ===================== БЭКТЕСТ (30 дней, часовые свечи) ===================== */
+// Трендово-откатная логика: тренд по EMA20/EMA50, вход после отката к EMA20 и возврата по тренду.
+// Стоп = 1,5·ATR(14), тейк = 2 стопа (1:2), позиция живёт не дольше 48 часов.
+const BT_TTL = 300000, BT_HOLD = 48, btCache = new Map();
+const ema = (a, n) => { const k = 2 / (n + 1), o = []; let e = a[0]; a.forEach((v, i) => { e = i ? v * k + e * (1 - k) : v; o.push(e); }); return o; };
+
+function runBacktest(b, risk) {
+  const c = b.map(x => x.c), e20 = ema(c, 20), e50 = ema(c, 50);
+  const tr = b.map((x, i) => i ? Math.max(x.h - x.l, Math.abs(x.h - b[i - 1].c), Math.abs(x.l - b[i - 1].c)) : x.h - x.l);
+  const atr = tr.map((_, i) => i < 14 ? null : tr.slice(i - 13, i + 1).reduce((s, v) => s + v, 0) / 14);
+  const trades = [];
+  let i = 50;
+  while (i < b.length - 1) {
+    const up = e20[i - 1] > e50[i - 1] && e20[i] > e50[i] && b[i - 1].l <= e20[i - 1] && b[i].c > e20[i] && b[i].c > b[i].o;
+    const dn = e20[i - 1] < e50[i - 1] && e20[i] < e50[i] && b[i - 1].h >= e20[i - 1] && b[i].c < e20[i] && b[i].c < b[i].o;
+    if (!(up || dn) || !atr[i]) { i++; continue; }
+    const d = up ? 1 : -1, e = b[i].c, dist = 1.5 * atr[i], sl = e - d * dist, tp = e + d * 2 * dist;
+    let R = null, why = '', j = i + 1;
+    for (; j < b.length && j <= i + BT_HOLD; j++) {
+      const hitSl = d > 0 ? b[j].l <= sl : b[j].h >= sl, hitTp = d > 0 ? b[j].h >= tp : b[j].l <= tp;
+      if (hitSl) { R = -1; why = 'стоп'; break; }       // если в свече задеты оба уровня — считаем стоп (осторожно)
+      if (hitTp) { R = 2; why = 'тейк'; break; }
+    }
+    if (R === null) { j = Math.min(j, b.length - 1); R = clamp(d * (b[j].c - e) / dist, -1, 2); why = 'по времени'; }
+    trades.push({ t: b[i].t, d, e, R, st: why });
+    i = j + 1;
+  }
+  let eq = 1, peak = 1, dd = 0, wins = 0, sum = 0;
+  const equity = [[b.length ? b[0].t : 0, 0]];
+  trades.forEach(t => {
+    eq *= 1 + risk / 100 * t.R; sum += t.R;
+    if (eq > peak) peak = eq;
+    dd = Math.max(dd, (peak - eq) / peak * 100);
+    if (t.R > 0) wins++;
+    equity.push([t.t, +((eq - 1) * 100).toFixed(2)]);
+  });
+  const n = trades.length;
+  return {
+    interval: '1h', bars: b.length, days: b.length ? Math.round((b[b.length - 1].t - b[0].t) / 86400) : 0, risk,
+    trades: n, wins, winRate: n ? +(wins / n * 100).toFixed(1) : 0, maxDD: +dd.toFixed(2), result: +((eq - 1) * 100).toFixed(2),
+    avgR: n ? +(sum / n).toFixed(2) : 0, equity,
+    list: trades.slice(-10).reverse().map(t => ({ t: t.t, d: t.d, e: t.e, r: +t.R.toFixed(2), st: t.st })),
+    note: b.length < 80 ? 'мало свечей за период' : ''
+  };
+}
+
+async function backtest(id, risk) {
+  const key = id + '|' + risk, hit = btCache.get(key), now = Date.now();
+  if (hit && now - hit.t < BT_TTL) return hit.v;
+  const r = await yahoo(id, '1mo', '1h', BT_TTL), q = (r.indicators.quote || [{}])[0], ts = r.timestamp || [], b = [];
+  ts.forEach((t, i) => {
+    if (q.close && q.close[i] != null && q.high && q.high[i] != null && q.low && q.low[i] != null)
+      b.push({ t, o: q.open && q.open[i] != null ? q.open[i] : q.close[i], h: q.high[i], l: q.low[i], c: q.close[i] });
+  });
+  const v = Object.assign({ id }, runBacktest(b, risk));
+  btCache.set(key, { t: now, v });
+  return v;
 }
 
 refreshNews();
@@ -328,10 +444,16 @@ http.createServer(async (req, res) => {
       if (!SYM[id] || id === 'usdrub') return send(400, { error: 'unknown id' });
       return send(200, await signal(id));
     }
+    if (u.pathname === '/api/backtest') {
+      const id = u.searchParams.get('symbol') || u.searchParams.get('id');
+      if (!SYM[id] || id === 'usdrub') return send(400, { error: 'unknown symbol' });
+      const risk = +clamp(parseFloat(u.searchParams.get('risk')) || 1, .1, 10).toFixed(2);
+      return send(200, await backtest(id, risk));
+    }
     if (u.pathname === '/' || u.pathname === '/index.html') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       return res.end(fs.readFileSync(path.join(__dirname, 'index.html')));
     }
     res.writeHead(404); res.end();
   } catch (e) { send(502, { error: String(e.message) }); }
-}).listen(process.env.PORT || 3000, () => console.log('Открой http://localhost:' + (process.env.PORT || 3000) + (process.env.GROQ_API_KEY ? '  (сигналы: Groq)' : '  (сигналы: встроенный анализатор)')));
+}).listen(process.env.PORT || 3000, () => console.log('Открой http://localhost:' + (process.env.PORT || 3000) + (process.env.OPENROUTER_API_KEY ? '  (сигналы: OpenRouter)' : '  (сигналы: встроенный анализатор)')));
