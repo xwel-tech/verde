@@ -179,7 +179,7 @@ async function localSignal(id, snap) {
 
 // ===== ИИ-анализ: промпт, разбор ответа, OpenRouter и Groq =====
 // openrouter/free сам выбирает свободную рабочую бесплатную модель; остальные: запасные
-const MODELS = ['openrouter/free', 'meta-llama/llama-3.3-70b-instruct:free', 'google/gemini-2.0-flash-exp:free'];
+const MODELS = ['openrouter/free', 'deepseek/deepseek-r1-0528:free', 'qwen/qwen3-32b:free', 'meta-llama/llama-3.2-3b-instruct:free'];
 
 function buildMessages(id, snap) {
   const quotes = {};
@@ -215,14 +215,18 @@ async function askOpenRouter(id, snap) {
       const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: { Authorization: 'Bearer ' + process.env.OPENROUTER_API_KEY, 'Content-Type': 'application/json', 'HTTP-Referer': 'http://localhost:3000', 'X-Title': 'Verde' },
-        body: JSON.stringify({ model, messages, temperature: .2, max_tokens: 500 }),   // без response_format: часть бесплатных моделей отвечает на него ошибкой 400
+        body: JSON.stringify({ model, messages, temperature: .2, max_tokens: 1200 }),   // 1200: thinking-моделям хватает места и на рассуждения, и на готовый JSON; без response_format: часть бесплатных моделей отвечает на него ошибкой 400
         signal: AbortSignal.timeout(15000)
       });
       const raw = await r.text();
       let j = null; try { j = JSON.parse(raw); } catch (e) { /* не JSON */ }
       if (!r.ok || (j && j.error)) throw new Error('HTTP ' + r.status + ' ' + String((j && j.error && (j.error.message || JSON.stringify(j.error))) || raw).slice(0, 300));
       const m = j && j.choices && j.choices[0] && j.choices[0].message;
-      const out = parseSignal(extractJson(m && (m.content || m.reasoning)));
+      // сначала content; если он пуст или без JSON, ищем JSON в reasoning (thinking-модели)
+      const texts = [m && m.content, m && m.reasoning, m && m.reasoning_content].map(x => typeof x === 'string' ? x : (x != null ? JSON.stringify(x) : '')).filter(x => x.trim());
+      let out = null, lastErr = null;
+      for (const t of texts.length ? texts : ['']) { try { out = parseSignal(extractJson(t)); break; } catch (e) { lastErr = e; } }
+      if (!out) throw lastErr || new Error('пустой ответ модели');
       out.model = (j && j.model) || model;
       return out;
     } catch (e) { errs.push(model + ': ' + e.message); }
