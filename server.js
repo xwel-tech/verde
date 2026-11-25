@@ -1,7 +1,6 @@
 // Запуск: node server.js  (нужен Node 18+, зависимости не нужны)
 // Открыть: http://localhost:3000
-// Сигналы через ИИ: OPENROUTER_API_KEY=ключ node server.js  (без ключа работает встроенный анализатор)
-// Необязательно: OPENROUTER_MODEL=id_модели — своя модель OpenRouter вместо бесплатных
+// Для ИИ-сигналов: OPENROUTER_API_KEY=ваш_ключ node server.js  (или GROQ_API_KEY; без ключа работает встроенный анализатор)
 const http = require('http'), fs = require('fs'), path = require('path');
 
 // Тикеры Yahoo Finance
@@ -57,370 +56,221 @@ async function history(id, iv) {
   return { id, iv, points: series(r).filter(p => p.t >= min).map(p => [p.t, p.c]) };
 }
 
-/* ===================== НОВОСТИ (RSS) ===================== */
-// Основной источник — FinancialJuice, дальше резервные: Investing и ForexLive.
+/* ===================== Новости ===================== */
+// Основной источник FinancialJuice, при сбое по очереди пробуем резервные
 const FEEDS = [
-  { name: 'FinancialJuice', url: 'https://www.financialjuice.com/feed.ashx?xy=rss' },
-  { name: 'Investing', url: 'https://www.investing.com/rss/news_1.rss' },
-  { name: 'ForexLive', url: 'https://www.forexlive.com/feed/news' }
+  ['FinancialJuice', 'https://www.financialjuice.com/feed.ashx?xy=rss'],
+  ['Investing.com', 'https://www.investing.com/rss/news.rss'],
+  ['ForexLive', 'https://www.forexlive.com/feed']
 ];
-const NEWS_N = 15, NEWS_EVERY = 60000;          // 15 заголовков, обновление раз в 60 секунд
-let news = { t: 0, source: '', items: [] };
+const TAGS = [
+  ['DXY', /\b(dollar|dxy|usd index|greenback|fed\b|fomc|powell|treasur|yields?|payrolls?|nfp|cpi|pce|inflation|jobless)/i],
+  ['EUR/USD', /\b(euro\b|eur\/usd|eurusd|ecb|lagarde|eurozone|bund)/i],
+  ['XAU/USD', /\b(gold|xau|bullion|safe.haven)/i],
+  ['BRENT', /\b(oil|brent|crude|opec|wti|barrel|refiner|saudi)/i],
+  ['BTC/USD', /\b(bitcoin|btc|crypto|ethereum|stablecoin|coinbase|binance)/i]
+];
+let news = { items: [], src: null, t: 0, err: null };
 
-const clean = s => s.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-  .replace(/&quot;/g, '"').replace(/&#0*39;|&apos;/g, "'").replace(/&nbsp;/g, ' ')
-  .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n)).replace(/&amp;/g, '&')
-  .replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
-const tag = (x, n) => {
-  const m = x.match(new RegExp('<' + n + '(?:\\s[^>]*)?>([\\s\\S]*?)</' + n + '>', 'i'));
-  return m ? clean(m[1]) : '';
-};
+const decode = x => x.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').replace(/<[^>]+>/g, ' ')
+  .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n)).replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCharCode(parseInt(n, 16)))
+  .replace(/&quot;/g, '"').replace(/&apos;|&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
 
 function parseRss(xml, src) {
-  const now = Math.floor(Date.now() / 1000);
-  return (xml.match(/<item[\s>][\s\S]*?<\/item>/gi) || []).map(it => {
-    const title = tag(it, 'title').replace(/^FinancialJuice:\s*/i, '');
-    const ms = Date.parse(tag(it, 'pubDate') || tag(it, 'dc:date'));
-    const t = isNaN(ms) ? now : Math.min(Math.floor(ms / 1000), now);
-    return { t, title, link: tag(it, 'link') || tag(it, 'guid'), src };
-  }).filter(n => n.title);
-}
-
-// Теги активов для Live-ленты (id совпадают с id активов в index.html)
-const TAGS = [
-  ['dxy', /\b(dollar|usd|dxy|fed|fomc|powell|treasur\w*|yields?|nfp|payrolls?|cpi|pce|ppi|jobless|ism)\b/i],
-  ['eurusd', /\b(euro|eur|ecb|lagarde|eurozone|euro zone|euro area|german\w*|bund)\b/i],
-  ['xau', /\b(gold|bullion|xau|safe[- ]haven)\b/i],
-  ['brent', /\b(oil|brent|crude|opec|wti|barrels?|refiner\w*|hormuz|iran\w*|saudi)\b/i],
-  ['btc', /\b(bitcoin|btc|crypto\w*|ethereum|stablecoin\w*)\b/i],
-  ['usdjpy', /\b(yen|jpy|boj|japan\w*|ueda)\b/i],
-  ['gbpusd', /\b(sterling|gbp|boe|bailey|uk|britain|british)\b/i],
-  ['spx', /\b(s&p|nasdaq|dow|wall street|equities|stocks?)\b/i]
-];
-function tagsOf(title, f) {
-  const out = TAGS.filter(x => x[1].test(title)).map(x => x[0]);
-  if (f.geo) ['xau', 'brent'].forEach(i => out.includes(i) || out.push(i));
-  return out.slice(0, 3);
-}
-
-async function pullFeed(f) {
-  const r = await fetch(f.url, {
-    headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/rss+xml, application/xml, text/xml, */*' },
-    signal: AbortSignal.timeout(8000)
-  });
-  if (!r.ok) throw new Error(f.name + ' ' + r.status);
-  return parseRss(await r.text(), f.name);
+  const out = [], re = /<(item|entry)[\s>][\s\S]*?<\/\1>/g;
+  let m;
+  while ((m = re.exec(xml))) {
+    const b = m[0];
+    const g = tag => { const x = new RegExp('<' + tag + '[^>]*>([\\s\\S]*?)</' + tag + '>', 'i').exec(b); return x ? decode(x[1]) : ''; };
+    const title = g('title').replace(/^FinancialJuice:\s*/i, '');
+    if (!title) continue;
+    let link = g('link'); if (!link) { const h = /<link[^>]*href=["']([^"']+)["']/i.exec(b); link = h ? h[1] : ''; }
+    const d = Date.parse(g('pubDate') || g('published') || g('updated') || g('dc:date'));
+    out.push({ title, link: /^https:\/\//.test(link) ? link : '', ts: isNaN(d) ? Date.now() : d, src, tags: TAGS.filter(t => t[1].test(title)).map(t => t[0]).slice(0, 3) });
+  }
+  return out;
 }
 
 async function refreshNews() {
-  const all = [], used = [];
-  for (const f of FEEDS) {
-    try { const it = await pullFeed(f); if (it.length) { all.push(...it); used.push(f.name); } }
-    catch (e) { /* источник недоступен — идём к резервному */ }
-    if (all.length >= NEWS_N) break;
-  }
-  const seen = new Set(), items = [];
-  all.sort((a, b) => b.t - a.t).forEach(n => {
-    const k = n.title.toLowerCase().replace(/[^a-z0-9а-я]+/g, '').slice(0, 60);
-    if (seen.has(k)) return;
-    seen.add(k);
-    items.push(Object.assign(n, { tags: tagsOf(n.title, factors(n.title)) }));
-  });
-  if (items.length) news = { t: Date.now(), source: used.join(' + '), items: items.slice(0, NEWS_N) };
-}
-
-/* ===================== АНАЛИЗ НОВОСТЕЙ ===================== */
-const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
-const KEY = ['dxy', 'eurusd', 'xau', 'brent', 'btc'];           // активы, которые уходят в анализ всегда
-const NAME = {
-  dxy: 'DXY', eurusd: 'EUR/USD', gbpusd: 'GBP/USD', usdjpy: 'USD/JPY', usdchf: 'USD/CHF', audusd: 'AUD/USD',
-  xau: 'XAU/USD', xag: 'XAG/USD', brent: 'BRENT', wti: 'WTI', ng: 'NG', spx: 'S&P 500', ndx: 'NDX', dax: 'DAX',
-  btc: 'BTC/USD', eth: 'ETH/USD'
-};
-
-// Ключевые слова (английские заголовки) → факторы: usd, eur, oil, geo (напряжённость), risk, btc, xau
-const RX = {
-  hawk: /hawkish|rate hikes?|raises? (interest )?rates?|higher for longer|hotter|stronger[- ]than[- ]expected|(above|tops?|beats?) (expectations|forecasts?|consensus|estimates)|inflation (rises|rose|accelerates|jumps|picks up)|yields? (rise|rose|jump|surge|climb)|(jobs|payrolls|nfp|retail sales|gdp|pmi|ism) (rise|rose|beat|beats|strong|stronger|above|jump)|jobless claims (fall|fell|drop|lower|below)/,
-  dove: /dovish|rate cuts?|cuts? (interest )?rates?|easing|softer|cooler|weaker[- ]than[- ]expected|(below|misses?|missed) (expectations|forecasts?|consensus|estimates)|inflation (falls|fell|cools|slows|eases|drops)|yields? (fall|fell|drop|slide|tumble|plunge)|(jobs|payrolls|nfp|retail sales|gdp|pmi|ism) (fall|fell|miss|misses|weak|weaker|below|contract|slump)|unemployment (rises|rose|jumps|higher)|jobless claims (rise|rose|jump|higher|above)/,
-  usUp: /\b(dollar|dxy|greenback)\b.*\b(rises?|rose|gains?|climbs?|jumps?|firm|firmer|higher|strengthens?|surges?)/,
-  usDn: /\b(dollar|dxy|greenback)\b.*\b(falls?|fell|slips?|drops?|slides?|weaker|lower|weakens?|retreats?|declines?)/,
-  us: /\b(fed|fomc|powell|treasur\w*|nfp|payrolls?|dollar|usd|u\.s\.|us)\b/,
-  eu: /\b(ecb|lagarde|eurozone|euro zone|euro area|german\w*|bund|france|italy)\b/,
-  ot: /\b(boj|boe|rba|snb|boc|japan\w*|uk|britain|british|australia\w*|swiss|china|chinese|canada|canadian)\b/,
-  oilUp: /opec.*(cut|extend|curb)|output cuts?|supply (disruption|cut|outage|loss|risk)|(inventories|stocks|stockpiles) (draw|fall|fell|drop)|crude (draw|inventories fall)|sanctions? (on|against|imposed)|pipeline (attack|outage|blast)|hormuz|refinery (attack|fire|outage)|(attack|strike|drone).*(tanker|oil|refinery|saudi|pipeline)|oil (rises?|rose|jumps?|climbs?|surges?|gains?)|(brent|crude|wti) (rises?|rose|jumps?|climbs?|surges?|gains?|higher)/,
-  oilDn: /opec.*(hike|raise|boost|increase|ramp)|output (hike|increase|boost)|(inventories|stocks|stockpiles) (build|rise|rose|jump|surge)|crude (build|inventories rise)|demand (fears?|concerns?|worries|weak\w*|slump|slows?)|oversupply|glut|sanctions? (eased|lifted|relief|waiver)|oil (falls?|fell|drops?|slides?|slumps?|tumbles?|declines?)|(brent|crude|wti) (falls?|fell|drops?|slides?|slumps?|tumbles?|declines?|lower)/,
-  esc: /\bwar\b|missile|strikes?\b|attack|escalat|invasion|invade|drone|explosion|retaliat|nuclear|troops|shelling|hostilit|conflict/,
-  de: /ceasefire|cease-fire|truce|peace|de-escalat|talks (progress|resume|restart)|deal reached|withdraw/,
-  on: /rall(y|ies)|record highs?|(stocks|equities|shares|futures) (rise|rose|jump|gain|surge|climb|higher)|risk[- ]on|soft landing/,
-  off: /(stocks|equities|shares|futures) (fall|fell|drop|slide|plunge|tumble|lower)|sell-?off|risk[- ]off|crash|plunge|recession (fears?|risk|warning)|slump/,
-  cr: /\b(bitcoin|btc|crypto\w*|ethereum|ether|stablecoin\w*)\b/,
-  crUp: /etf (inflows?|approv\w*)|inflows?|adoption|approv\w*|record|surge|rall(y|ies)|jumps?|soars?|gains?|climbs?|reserve/,
-  crDn: /hack\w*|exploit|\bbans?\b|crackdown|lawsuit|sues?|outflows?|liquidat\w*|plunge|sell-?off|drops?|falls?|slides?|tumbles?|crash|rejects?/,
-  au: /\b(gold|bullion|xau)\b/,
-  auUp: /rises?|rose|rall(y|ies)|record|jumps?|gains?|surges?|climbs?|higher|soars?/,
-  auDn: /falls?|fell|drops?|slides?|slumps?|lower|retreats?|dips?|declines?|tumbles?/
-};
-
-function factors(title) {
-  const s = title.toLowerCase(), f = { usd: 0, eur: 0, oil: 0, geo: 0, risk: 0, btc: 0, xau: 0 };
-  const pol = (RX.hawk.test(s) ? 1 : 0) - (RX.dove.test(s) ? 1 : 0);   // ястребиный (+) / голубиный (−) фон
-  if (RX.usUp.test(s)) f.usd = 1;
-  else if (RX.usDn.test(s)) f.usd = -1;
-  else if (pol) {
-    if (RX.us.test(s)) f.usd = pol;
-    else if (RX.eu.test(s)) f.eur = pol;
-    else if (!RX.ot.test(s)) f.usd = pol;
-  }
-  f.oil = (RX.oilUp.test(s) ? 1 : 0) - (RX.oilDn.test(s) ? 1 : 0);
-  f.geo = (RX.esc.test(s) ? 1 : 0) - (RX.de.test(s) ? 1 : 0);
-  f.risk = (RX.on.test(s) ? 1 : 0) - (RX.off.test(s) ? 1 : 0);
-  if (RX.cr.test(s)) f.btc = (RX.crUp.test(s) ? 1 : 0) - (RX.crDn.test(s) ? 1 : 0);
-  if (RX.au.test(s)) f.xau = (RX.auUp.test(s) ? 1 : 0) - (RX.auDn.test(s) ? 1 : 0);
-  return f;
-}
-
-// Чувствительность актива к новостным факторам
-const BETA = {
-  dxy: { usd: 1 }, eurusd: { usd: -.8, eur: .8, risk: .2 }, gbpusd: { usd: -.7, risk: .4 }, audusd: { usd: -.7, risk: .5 },
-  usdjpy: { usd: .7, geo: -.3, risk: .2 }, usdchf: { usd: .7, geo: -.3 },
-  xau: { usd: -.6, geo: .5, xau: 1 }, xag: { usd: -.6, geo: .4, xau: .6 },
-  brent: { oil: 1, geo: .3, usd: -.2 }, wti: { oil: 1, geo: .3, usd: -.2 }, ng: { oil: .3, geo: .2 },
-  spx: { risk: 1, geo: -.5, usd: -.1 }, ndx: { risk: 1, geo: -.5, usd: -.1 }, dax: { risk: 1, geo: -.5, eur: .2 },
-  btc: { risk: .5, btc: 1, usd: -.3 }, eth: { risk: .5, btc: 1, usd: -.3 }
-};
-// Типичное дневное движение, % (для нормировки динамики цены)
-const VOL = {
-  dxy: .35, eurusd: .4, gbpusd: .45, audusd: .5, usdjpy: .5, usdchf: .45, xau: 1, xag: 1.8, brent: 1.6, wti: 1.6,
-  ng: 2.5, spx: .8, ndx: 1, dax: .9, btc: 2.5, eth: 3
-};
-// Связь актива с дневным движением DXY и Brent (знак — корреляция, модуль — сила)
-const MB = {
-  dxy: [0, 0], eurusd: [-.8, 0], gbpusd: [-.7, 0], audusd: [-.6, .1], usdjpy: [.6, -.1], usdchf: [.6, 0],
-  xau: [-.5, .1], xag: [-.4, .1], brent: [-.2, 0], wti: [-.2, .9], ng: [0, .2],
-  spx: [-.2, -.1], ndx: [-.2, -.1], dax: [-.3, -.1], btc: [-.3, 0], eth: [-.3, 0]
-};
-
-const f2 = v => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(2).replace('.', ',') + '%';
-const short = t => t.length > 110 ? t.slice(0, 107) + '…' : t;
-const STATUS = { 1: 'ПОКУПАТЬ', '-1': 'ПРОДАВАТЬ', 0: 'ЖДАТЬ' };
-
-// Резервный анализатор: новости (50%) + динамика цены актива (25%) + DXY и Brent с учётом корреляции (25%)
-function rulesSignal(id, qs, items) {
-  const b = BETA[id] || {}, raw = {}, rows = [];
-  items.forEach((n, i) => {
-    const f = factors(n.title), w = Math.pow(.9, i);       // свежие заголовки весят больше
-    let c = 0;
-    for (const k in f) { raw[k] = (raw[k] || 0) + f[k] * w; c += (b[k] || 0) * f[k] * w; }
-    if (c) rows.push({ title: n.title, c });
-  });
-  let N = 0;
-  for (const k in b) N += b[k] * Math.tanh((raw[k] || 0) / 1.5);
-  N = clamp(N, -1, 1);
-  const pct = i => qs[i] && isFinite(qs[i].pct) ? qs[i].pct : null;
-  const P = pct(id) == null ? 0 : clamp(pct(id) / (VOL[id] || 1), -1, 1);
-  const mb = MB[id] || [0, 0], dx = pct('dxy'), br = pct('brent');
-  const M = clamp(mb[0] * (dx == null ? 0 : clamp(dx / VOL.dxy, -1, 1)) + mb[1] * (br == null ? 0 : clamp(br / VOL.brent, -1, 1)), -1, 1);
-  const tot = .5 * N + .25 * P + .25 * M, side = tot >= .2 ? 1 : tot <= -.2 ? -1 : 0;
-  const confidence = !items.length && pct(id) == null ? 30
-    : side ? Math.round(Math.min(92, 40 + Math.abs(tot) * 110)) : Math.round(45 + (.2 - Math.abs(tot)) / .2 * 25);
-
-  const top = rows.sort((a, b) => Math.abs(b.c) - Math.abs(a.c))[0], nm = NAME[id], parts = [];
-  parts.push(top && Math.abs(N) > .1
-    ? `Новости ${N > 0 ? 'работают на рост' : 'давят на'} ${nm}: «${short(top.title)}».`
-    : `Свежие новости не дают явного перевеса для ${nm}.`);
-  const pr = [id, 'dxy', 'brent'].filter((v, i, a) => a.indexOf(v) === i && pct(v) != null).map(v => NAME[v] + ' ' + f2(pct(v)));
-  if (pr.length) parts.push('Динамика за день: ' + pr.join(', ') + '.');
-  if (Math.abs(M) > .1) parts.push(`Связь с DXY и Brent ${M > 0 ? 'поддерживает' : 'давит на'} актив.`);
-  parts.push(side > 0 ? 'Перевес факторов в сторону покупки.' : side < 0 ? 'Перевес факторов в сторону продажи.' : 'Факторы слабые или разнонаправленные — лучше подождать.');
-  return { status: STATUS[side], confidence, reason: parts.join(' ') };
-}
-
-// ИИ-анализ через OpenRouter (основная модель, при сбое — автоматический бесплатный фолбэк)
-// Свою модель можно задать так: OPENROUTER_MODEL=anthropic/claude-3.5-haiku node server.js
-const OR_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const OR_MODELS = (process.env.OPENROUTER_MODEL ? [process.env.OPENROUTER_MODEL] : [])
-  .concat(['meta-llama/llama-3.3-70b-instruct:free', 'openrouter/free']);
-const norm = s => {
-  s = String(s || '').toUpperCase();
-  return /ПОКУП|BUY|LONG/.test(s) ? 'ПОКУПАТЬ' : /ПРОДА|SELL|SHORT/.test(s) ? 'ПРОДАВАТЬ' : /ЖДА|HOLD|WAIT|NEUTRAL/.test(s) ? 'ЖДАТЬ' : null;
-};
-
-const SYSTEM_PROMPT = `Ты — встроенный финансовый аналитик торгового дашборда. Твоя единственная задача — сопоставлять свежие заголовки новостей (FinancialJuice) с живыми рыночными котировками (DXY, EUR/USD, XAU/USD, BRENT, BTC/USD), отсеивать рыночный шум и выдавать пользователю краткий вердикт по выбранному активу (поле "asset" во входных данных).
-
-Алгоритм:
-1. Прочитай последние заголовки (они на английском) и выдели макроэкономические драйверы: решения ЦБ по ставкам, данные по инфляции и занятости США, запасы нефти, потоки в крипто-ETF, геополитика. Чем меньше minutes_ago, тем важнее заголовок. Заголовки, не влияющие на выбранный актив, — шум, не учитывай их.
-2. Проверь, подтверждает ли текущее движение цены (change_pct_day, day_range_pos) и корреляция с поводырями DXY и BRENT смысл этих новостей. Типичные связи: рост DXY давит на EUR/USD, золото и BTC; рост Brent поддерживает нефтяные активы и инфляционные ожидания; эскалация конфликтов поддерживает золото и нефть; снижение ставок и слабые данные США ослабляют доллар.
-3. Выдай вердикт.
-
-Статус:
-- "ПОКУПАТЬ" или "ПРОДАВАТЬ" — только если новости и график (с учётом DXY и Brent) однозначно смотрят в одну сторону.
-- "ЖДАТЬ" — если значимых новостей нет, они противоречивы, цена их не подтверждает или рынок стоит на месте.
-
-Уверенность (confidence) — целое число от 50 до 95: чем больше факторов совпадает и чем свежее новость, тем выше. Для "ЖДАТЬ" это уверенность в том, что сигнала сейчас нет.
-
-Обоснование (reason) — 2–3 коротких предложения на русском языке для человека: какая именно новость и как влияет на цену прямо сейчас.
-
-Ответь СТРОГО одним JSON-объектом, без markdown и текста вокруг:
-{"status":"ПОКУПАТЬ"|"ПРОДАВАТЬ"|"ЖДАТЬ","confidence":50-95,"reason":"..."}`;
-
-async function aiSignal(id, qs, items) {
-  const quotes = {};
-  Object.keys(qs).forEach(i => {
-    const q = qs[i], span = q.hi - q.lo;
-    quotes[NAME[i]] = {
-      price: +q.price.toFixed(4),
-      change_pct_day: +q.pct.toFixed(3),
-      typical_daily_move_pct: VOL[i] || null,
-      day_range_pos: span > 0 ? +((q.price - q.lo) / span).toFixed(2) : null   // 0 = у минимума дня, 1 = у максимума
-    };
-  });
-  const now = Date.now() / 1000;
-  const body = {
-    temperature: .2, max_tokens: 400,
-    messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
-      {
-        role: 'user',
-        content: JSON.stringify({
-          asset: NAME[id], quotes,
-          headlines: items.map(n => ({ minutes_ago: Math.max(0, Math.round((now - n.t) / 60)), text: n.title, related: (n.tags || []).map(t => NAME[t] || t) }))
-        })
-      }
-    ]
-  };
-  let lastErr;
-  for (const model of OR_MODELS) {
+  let err = null;
+  for (const [name, url] of FEEDS) {
     try {
-      const r = await fetch(OR_URL, {
+      const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; VerdeBot/1.0)', Accept: 'application/rss+xml, application/xml, text/xml, */*' }, signal: AbortSignal.timeout(8000) });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const items = parseRss(await r.text(), name);
+      if (!items.length) throw new Error('пустая лента');
+      const seen = new Set();
+      news = { items: items.filter(i => !seen.has(i.title) && seen.add(i.title)).sort((a, b) => b.ts - a.ts).slice(0, 15), src: name, t: Date.now(), err: null };
+      return;
+    } catch (e) { err = name + ': ' + e.message; }
+  }
+  news.err = err;   // все источники недоступны: оставляем последние удачные заголовки
+}
+refreshNews(); setInterval(refreshNews, 60000);
+
+/* ===================== Сигналы: новости + цены ===================== */
+const CORE = ['dxy', 'eurusd', 'xau', 'brent', 'btc'];
+const CORE_IDX = { dxy: 0, eurusd: 1, xau: 2, brent: 3, btc: 4 };
+const TN = { dxy: 'DXY', eurusd: 'EUR/USD', gbpusd: 'GBP/USD', usdjpy: 'USD/JPY', usdchf: 'USD/CHF', audusd: 'AUD/USD', xau: 'XAU/USD', xag: 'XAG/USD', brent: 'BRENT', wti: 'WTI', ng: 'NG', spx: 'S&P 500', ndx: 'NASDAQ 100', dax: 'DAX', btc: 'BTC/USD', eth: 'ETH/USD' };
+const PROXY = { gbpusd: 'eurusd', audusd: 'eurusd', usdjpy: 'dxy', usdchf: 'dxy', wti: 'brent', xag: 'xau', eth: 'btc', spx: 'btc', ndx: 'btc', dax: 'btc', ng: 'brent' };
+const SCALE = { dxy: .4, eurusd: .4, gbpusd: .4, usdjpy: .5, usdchf: .4, audusd: .5, xau: 1, xag: 1.8, brent: 1.5, wti: 1.5, ng: 3, spx: .8, ndx: 1, dax: .8, btc: 2.5, eth: 3 };
+// Темы новостей и их эффект на [DXY, EUR/USD, XAU, BRENT, BTC], от −1 до +1
+const THEMES = [
+  [/\b(hike|hawkish|higher for longer|hot (cpi|inflation)|strong (jobs|payrolls|nfp)|yields? (rise|jump|surge)|inflation (rises?|accelerat))/i, 'ястребиная политика или сильная макростатистика США', [1, -1, -1, -.2, -.7]],
+  [/\b(rate cuts?|dovish|cuts? rates?|weak (jobs|payrolls|nfp)|inflation (cools?|eases?|slows?|falls?)|yields? (fall|drop|slump)|unemployment (rises?|jumps?))/i, 'смягчение политики или слабая макростатистика США', [-1, 1, 1, .2, .7]],
+  [/\b(war|attack|strike[sd]?|missile|escalat|tensions?|sanctions?|geopolitic|conflict|invasion|terror)/i, 'рост геополитической напряжённости', [.5, -.4, 1, .7, -.5]],
+  [/\b(ceasefire|peace|de-?escalat|truce|stimulus|risk[- ]on|rally|record high)/i, 'снижение напряжённости, аппетит к риску', [-.3, .2, -.3, -.2, .6]],
+  [/\b(opec\+? (cut|cuts|curb)|output cuts?|supply (cut|disruption|outage)|inventor(y|ies) (draw|fell|drop)|crude draw|pipeline (outage|attack))/i, 'сокращение предложения нефти', [0, 0, 0, 1, 0]],
+  [/\b(opec\+? (hike|raise|boost|increase)|oversupply|inventor(y|ies) (build|rose|rise)|crude build|demand (weak|fears|slump)|output (rise|increase))/i, 'избыток предложения или слабый спрос на нефть', [0, 0, 0, -1, 0]],
+  [/\b(ecb (hike|hawkish)|lagarde (hawkish|hike)|eurozone (inflation (rises|jumps)|growth (beats|accelerat)))/i, 'ястребиная позиция ЕЦБ', [-.5, 1, -.1, 0, 0]],
+  [/\b(ecb (cut|dovish)|lagarde (dovish|cut)|eurozone (recession|contraction|slump)|german (recession|contraction))/i, 'мягкая позиция ЕЦБ или слабая экономика еврозоны', [.5, -1, .1, 0, 0]],
+  [/\b(etf (inflows?|approval|approved)|bitcoin (surge|rally|record|adoption)|crypto (rally|inflows?)|institutional (buying|adoption))/i, 'позитив для криптовалют', [0, 0, 0, 0, 1]],
+  [/\b(hack(ed)?|exploit|crypto ban|lawsuit|etf outflows?|bitcoin (plunge|crash|slump)|crypto (selloff|outflows?|crackdown))/i, 'негатив для криптовалют', [0, 0, 0, 0, -1]],
+  [/\b(central banks? (buy|buying|purchas)|gold (record|surge|rally|jump)|safe.haven (demand|buying))/i, 'спрос на золото', [0, 0, 1, 0, 0]],
+  [/\b(gold (slump|falls?|drops?|selloff|plunge))/i, 'давление на золото', [0, 0, -1, 0, 0]]
+];
+const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+const avg = a => a.reduce((x, y) => x + y, 0) / (a.length || 1);
+const sg2 = v => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(2).replace('.', ',') + '%';
+
+function newsScore(id) {
+  const idx = CORE_IDX[PROXY[id] || id];
+  if (idx == null) return { v: 0, drivers: [] };
+  let sum = 0; const hits = {};
+  for (const it of news.items) {
+    const w = Math.pow(.5, Math.max(0, Date.now() - it.ts) / 5400000);       // свежесть: полураспад 90 минут
+    for (const [re, label, eff] of THEMES) if (eff[idx] && re.test(it.title)) { sum += w * eff[idx]; hits[label] = (hits[label] || 0) + w * eff[idx]; }
+  }
+  const drivers = Object.entries(hits).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).slice(0, 2).map(([l, v]) => l + (v > 0 ? ' (в пользу роста)' : ' (в пользу падения)'));
+  return { v: Math.tanh(sum / 1.5), drivers };
+}
+
+async function corrOf(a, b) {   // корреляция доходностей за 24 часа (15-минутные свечи)
+  try {
+    const [x, y] = await Promise.all([history(a, '15m'), history(b, '15m')]), m = new Map(y.points), xa = [], ya = [];
+    x.points.forEach(p => { if (m.has(p[0])) { xa.push(p[1]); ya.push(m.get(p[0])); } });
+    if (xa.length < 12) return null;
+    const rt = c => c.slice(1).map((v, i) => v / c[i] - 1), r1 = rt(xa), r2 = rt(ya), mx = avg(r1), my = avg(r2);
+    let sxy = 0, sxx = 0, syy = 0;
+    for (let i = 0; i < r1.length; i++) { sxy += (r1[i] - mx) * (r2[i] - my); sxx += (r1[i] - mx) ** 2; syy += (r2[i] - my) ** 2; }
+    return sxx && syy ? sxy / Math.sqrt(sxx * syy) : null;
+  } catch (e) { return null; }
+}
+
+const statusOf = t => t >= .2 ? 'ПОКУПАТЬ' : t <= -.2 ? 'ПРОДАВАТЬ' : 'ЖДАТЬ';
+
+// Встроенный анализатор: ключевые слова новостей + динамика цены + корреляция с DXY и Brent
+async function localSignal(id, snap) {
+  const q = snap[id], mom = clamp(q.pct / (SCALE[id] || 1), -1, 1), ns = newsScore(id);
+  let num = 0, den = 0;
+  for (const ref of ['dxy', 'brent']) {
+    if (ref === id || !snap[ref]) continue;
+    const c = await corrOf(id, ref);
+    if (c != null) { num += c * clamp(snap[ref].pct / SCALE[ref], -1, 1); den += Math.abs(c); }
+  }
+  const mac = den > .05 ? clamp(num / den, -1, 1) : 0, hasNews = news.items.length > 0;
+  const total = hasNews ? .5 * ns.v + .25 * mom + .25 * mac : .5 * mom + .5 * mac;
+  const status = statusOf(total), conf = Math.round(Math.min(95, 35 + Math.abs(total) * 120));
+  const nTxt = hasNews ? (ns.drivers.length ? 'Новости: ' + ns.drivers.join('; ') + '.' : 'В свежих новостях нет явных драйверов.') : 'Лента новостей недоступна, анализ только по ценам.';
+  const mTxt = (snap.dxy ? 'DXY ' + sg2(snap.dxy.pct) : '') + (snap.brent ? ', Brent ' + sg2(snap.brent.pct) : '');
+  const tail = status === 'ЖДАТЬ' ? 'Факторы слабые или противоречат друг другу.' : 'Факторы сходятся в одну сторону.';
+  return { status, confidence: conf, reason: `${nTxt} ${TN[id]} ${sg2(q.pct)} за день; ${mTxt}; корреляционный фон ${mac >= 0 ? 'за рост' : 'за падение'} (${mac.toFixed(2).replace('.', ',')}). ${tail}` };
+}
+
+// ===== ИИ-анализ: промпт, разбор ответа, OpenRouter и Groq =====
+// openrouter/free сам выбирает свободную рабочую бесплатную модель; остальные: запасные
+const MODELS = ['openrouter/free', 'meta-llama/llama-3.3-70b-instruct:free', 'google/gemini-2.0-flash-exp:free'];
+
+function buildMessages(id, snap) {
+  const quotes = {};
+  for (const k of Object.keys(snap)) quotes[TN[k]] = { price: snap[k].price, change_day_pct: +snap[k].pct.toFixed(3), open: snap[k].open };
+  const headlines = news.items.map(i => ({ title: i.title, minutes_ago: Math.round((Date.now() - i.ts) / 60000), tags: i.tags }));
+  return [
+    { role: 'system', content: 'Ты аналитик рынков. По заголовкам новостей и котировкам оцени краткосрочное (на несколько часов) направление указанного актива. Опирайся только на переданные данные, ничего не выдумывай. Ответь ТОЛЬКО JSON без пояснений и без markdown: {"status":"ПОКУПАТЬ"|"ПРОДАВАТЬ"|"ЖДАТЬ","confidence":число от 0 до 100,"reason":"1-3 предложения на русском языке"}. Если новости противоречивы или несущественны, ставь ЖДАТЬ.' },
+    { role: 'user', content: JSON.stringify({ asset: TN[id], quotes, headlines }) }
+  ];
+}
+
+// Достаём JSON из текста ответа (модель могла добавить пояснения или ```json)
+function extractJson(text) {
+  const t = String(text || ''), cands = [], g = t.match(/\{[\s\S]*\}/);
+  if (g) cands.push(g[0]);
+  (t.match(/\{[^{}]*\}/g) || []).forEach(c => cands.push(c));
+  for (const c of cands) { try { const j = JSON.parse(c); if (j && j.status) return j; } catch (e) { /* пробуем следующий */ } }
+  throw new Error('JSON не найден в ответе: ' + t.slice(0, 120));
+}
+
+function parseSignal(j) {
+  const map = { 'ПОКУПАТЬ': 'ПОКУПАТЬ', 'BUY': 'ПОКУПАТЬ', 'ПРОДАВАТЬ': 'ПРОДАВАТЬ', 'SELL': 'ПРОДАВАТЬ', 'ЖДАТЬ': 'ЖДАТЬ', 'WAIT': 'ЖДАТЬ', 'HOLD': 'ЖДАТЬ' };
+  const status = map[String(j.status).trim().toUpperCase()], conf = Math.round(Number(j.confidence));
+  if (!status || isNaN(conf) || !j.reason) throw new Error('неверный формат ответа');
+  return { status, confidence: clamp(conf, 0, 100), reason: String(j.reason).slice(0, 500) };
+}
+
+async function askOpenRouter(id, snap) {
+  const messages = buildMessages(id, snap), errs = [], t0 = Date.now();
+  for (const model of MODELS) {
+    if (Date.now() - t0 > 30000) { errs.push('превышено общее время ожидания'); break; }
+    try {
+      const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json', Authorization: 'Bearer ' + process.env.OPENROUTER_API_KEY,
-          'HTTP-Referer': 'http://localhost:3000', 'X-Title': 'Verde'
-        },
-        body: JSON.stringify(Object.assign({ model }, body)), signal: AbortSignal.timeout(20000)
+        headers: { Authorization: 'Bearer ' + process.env.OPENROUTER_API_KEY, 'Content-Type': 'application/json', 'HTTP-Referer': 'http://localhost:3000', 'X-Title': 'Verde' },
+        body: JSON.stringify({ model, messages, temperature: .2, max_tokens: 500 }),   // без response_format: часть бесплатных моделей отвечает на него ошибкой 400
+        signal: AbortSignal.timeout(15000)
       });
-      if (!r.ok) throw new Error(model + ' ' + r.status);
-      const j = await r.json(), txt = String(j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content || '');
-      const m = txt.match(/\{[\s\S]*\}/);
-      if (!m) throw new Error(model + ': нет JSON в ответе');
-      const o = JSON.parse(m[0]), status = norm(o.status), reason = o.reason || o.explanation;
-      if (!status || !reason) throw new Error(model + ': неверный формат ответа');
-      return {
-        status, confidence: clamp(Math.round(Number(o.confidence)) || 50, 50, 95),
-        reason: String(reason).trim().slice(0, 600), model: j.model || model
-      };
-    } catch (e) { lastErr = e; }           // модель занята или ответила криво — пробуем следующую
+      const raw = await r.text();
+      let j = null; try { j = JSON.parse(raw); } catch (e) { /* не JSON */ }
+      if (!r.ok || (j && j.error)) throw new Error('HTTP ' + r.status + ' ' + String((j && j.error && (j.error.message || JSON.stringify(j.error))) || raw).slice(0, 300));
+      const m = j && j.choices && j.choices[0] && j.choices[0].message;
+      const out = parseSignal(extractJson(m && (m.content || m.reasoning)));
+      out.model = (j && j.model) || model;
+      return out;
+    } catch (e) { errs.push(model + ': ' + e.message); }
   }
-  throw lastErr;
+  throw new Error(errs.join(' | ').slice(0, 800));
 }
 
-// Финальные предохранители (для ИИ и для встроенного анализатора одинаково)
-function finalize(id, qs, items, res) {
-  res.confidence = clamp(Math.round(res.confidence) || 50, 50, 95);
-  if (!items.length && res.status !== 'ЖДАТЬ') {
-    return Object.assign(res, { status: 'ЖДАТЬ', confidence: 55, reason: 'Свежих новостей нет, поэтому сигнала нет — лучше подождать.' });
-  }
-  const q = qs[id], p = q && isFinite(q.pct) ? q.pct / (VOL[id] || 1) : 0, d = SIDE[res.status];
-  if (d && d * p < -.25) {     // цена идёт против вердикта — «однозначного» совпадения нет
-    return Object.assign(res, { status: 'ЖДАТЬ', confidence: 60, reason: String(res.reason).slice(0, 450) + ` Но цена движется против этого вердикта (${f2(q.pct)} за день), поэтому лучше подождать.` });
-  }
-  return res;
+async function groqSignal(id, snap) {
+  const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST', headers: { Authorization: 'Bearer ' + process.env.GROQ_API_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: 'llama-3.3-70b-versatile', temperature: .2, max_tokens: 400, response_format: { type: 'json_object' }, messages: buildMessages(id, snap) }),
+    signal: AbortSignal.timeout(15000)
+  });
+  if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + (await r.text()).slice(0, 200));
+  const out = parseSignal(extractJson((await r.json()).choices[0].message.content));
+  out.model = 'llama-3.3-70b-versatile';
+  return out;
 }
 
-const SIDE = { 'ПОКУПАТЬ': 1, 'ПРОДАВАТЬ': -1, 'ЖДАТЬ': 0 };
-// Сигнал пересчитывается не чаще раза в 60 с; если заголовки не менялись — не позже чем раз в 120 с
-const TTL_MIN = 60000, TTL_MAX = 120000, sigCache = new Map(), inflight = new Map();
-const newsKey = () => news.items.map(n => n.title).join('|');
+async function snapshot(id) {
+  const out = {};
+  await Promise.all([...new Set([id, ...CORE])].map(async i => { try { out[i] = await quote(i); } catch (e) { /* нет котировки */ } }));
+  return out;
+}
 
+const sigCache = new Map(), sigJobs = new Map();
 async function signal(id) {
-  const hit = sigCache.get(id), now = Date.now();
-  if (hit) { const age = now - hit.t; if (age < TTL_MIN || (age < TTL_MAX && hit.n === newsKey())) return hit.v; }
-  if (inflight.has(id)) return inflight.get(id);
-  const p = (async () => {
-    const qs = {};
-    await Promise.all(KEY.concat(id).filter((v, i, a) => a.indexOf(v) === i).map(async i => { try { qs[i] = await quote(i); } catch (e) { /* пропускаем актив */ } }));
-    if (!qs[id]) throw new Error('no quote');
-    const items = news.items;
-    let res, source = 'rules';
-    if (process.env.OPENROUTER_API_KEY) {
-      try { res = await aiSignal(id, qs, items); source = 'openrouter'; }
-      catch (e) { console.warn('OpenRouter недоступен, работает встроенный анализатор:', e.message); }
-    }
-    if (!res) res = rulesSignal(id, qs, items);
-    res = finalize(id, qs, items, res);
-    const v = {
-      id, status: res.status, side: SIDE[res.status], confidence: res.confidence, reason: res.reason,
-      source, model: source == 'openrouter' ? res.model : null,
-      t: Math.floor(Date.now() / 1000), news_t: Math.floor(news.t / 1000)
-    };
-    sigCache.set(id, { t: Date.now(), n: newsKey(), v });
+  const hit = sigCache.get(id);
+  if (hit && Date.now() - hit.t < 60000) return hit.v;
+  if (sigJobs.has(id)) return sigJobs.get(id);
+  const job = (async () => {
+    const snap = await snapshot(id);
+    if (!snap[id]) throw new Error('нет котировки ' + id);
+    let r = null, source = 'rules';
+    const errs = [];
+    if (process.env.OPENROUTER_API_KEY) { try { r = await askOpenRouter(id, snap); source = 'openrouter'; } catch (e) { errs.push('OpenRouter: ' + e.message); } }
+    if (!r && process.env.GROQ_API_KEY) { try { r = await groqSignal(id, snap); source = 'groq'; } catch (e) { errs.push('Groq: ' + e.message); } }
+    if (!process.env.OPENROUTER_API_KEY && !process.env.GROQ_API_KEY) errs.push('ключ ИИ не задан (OPENROUTER_API_KEY)');
+    errs.forEach(e => console.warn('ИИ недоступен, работает встроенный анализатор:', e));
+    if (!r) r = await localSignal(id, snap);
+    const v = { id, status: r.status, side: r.status === 'ПОКУПАТЬ' ? 1 : r.status === 'ПРОДАВАТЬ' ? -1 : 0, confidence: r.confidence, reason: r.reason, source, model: r.model || null, aiError: errs.length ? errs.join(' | ').slice(0, 900) : null,
+      news: { src: news.src, updated: news.t, count: news.items.length, error: news.err }, t: Date.now() };
+    sigCache.set(id, { t: Date.now(), v });
     return v;
-  })().finally(() => inflight.delete(id));
-  inflight.set(id, p);
-  return p;
+  })().finally(() => sigJobs.delete(id));
+  sigJobs.set(id, job);
+  return job;
 }
-
-/* ===================== БЭКТЕСТ (30 дней, часовые свечи) ===================== */
-// Трендово-откатная логика: тренд по EMA20/EMA50, вход после отката к EMA20 и возврата по тренду.
-// Стоп = 1,5·ATR(14), тейк = 2 стопа (1:2), позиция живёт не дольше 48 часов.
-const BT_TTL = 300000, BT_HOLD = 48, btCache = new Map();
-const ema = (a, n) => { const k = 2 / (n + 1), o = []; let e = a[0]; a.forEach((v, i) => { e = i ? v * k + e * (1 - k) : v; o.push(e); }); return o; };
-
-function runBacktest(b, risk) {
-  const c = b.map(x => x.c), e20 = ema(c, 20), e50 = ema(c, 50);
-  const tr = b.map((x, i) => i ? Math.max(x.h - x.l, Math.abs(x.h - b[i - 1].c), Math.abs(x.l - b[i - 1].c)) : x.h - x.l);
-  const atr = tr.map((_, i) => i < 14 ? null : tr.slice(i - 13, i + 1).reduce((s, v) => s + v, 0) / 14);
-  const trades = [];
-  let i = 50;
-  while (i < b.length - 1) {
-    const up = e20[i - 1] > e50[i - 1] && e20[i] > e50[i] && b[i - 1].l <= e20[i - 1] && b[i].c > e20[i] && b[i].c > b[i].o;
-    const dn = e20[i - 1] < e50[i - 1] && e20[i] < e50[i] && b[i - 1].h >= e20[i - 1] && b[i].c < e20[i] && b[i].c < b[i].o;
-    if (!(up || dn) || !atr[i]) { i++; continue; }
-    const d = up ? 1 : -1, e = b[i].c, dist = 1.5 * atr[i], sl = e - d * dist, tp = e + d * 2 * dist;
-    let R = null, why = '', j = i + 1;
-    for (; j < b.length && j <= i + BT_HOLD; j++) {
-      const hitSl = d > 0 ? b[j].l <= sl : b[j].h >= sl, hitTp = d > 0 ? b[j].h >= tp : b[j].l <= tp;
-      if (hitSl) { R = -1; why = 'стоп'; break; }       // если в свече задеты оба уровня — считаем стоп (осторожно)
-      if (hitTp) { R = 2; why = 'тейк'; break; }
-    }
-    if (R === null) { j = Math.min(j, b.length - 1); R = clamp(d * (b[j].c - e) / dist, -1, 2); why = 'по времени'; }
-    trades.push({ t: b[i].t, d, e, R, st: why });
-    i = j + 1;
-  }
-  let eq = 1, peak = 1, dd = 0, wins = 0, sum = 0;
-  const equity = [[b.length ? b[0].t : 0, 0]];
-  trades.forEach(t => {
-    eq *= 1 + risk / 100 * t.R; sum += t.R;
-    if (eq > peak) peak = eq;
-    dd = Math.max(dd, (peak - eq) / peak * 100);
-    if (t.R > 0) wins++;
-    equity.push([t.t, +((eq - 1) * 100).toFixed(2)]);
-  });
-  const n = trades.length;
-  return {
-    interval: '1h', bars: b.length, days: b.length ? Math.round((b[b.length - 1].t - b[0].t) / 86400) : 0, risk,
-    trades: n, wins, winRate: n ? +(wins / n * 100).toFixed(1) : 0, maxDD: +dd.toFixed(2), result: +((eq - 1) * 100).toFixed(2),
-    avgR: n ? +(sum / n).toFixed(2) : 0, equity,
-    list: trades.slice(-10).reverse().map(t => ({ t: t.t, d: t.d, e: t.e, r: +t.R.toFixed(2), st: t.st })),
-    note: b.length < 80 ? 'мало свечей за период' : ''
-  };
-}
-
-async function backtest(id, risk) {
-  const key = id + '|' + risk, hit = btCache.get(key), now = Date.now();
-  if (hit && now - hit.t < BT_TTL) return hit.v;
-  const r = await yahoo(id, '1mo', '1h', BT_TTL), q = (r.indicators.quote || [{}])[0], ts = r.timestamp || [], b = [];
-  ts.forEach((t, i) => {
-    if (q.close && q.close[i] != null && q.high && q.high[i] != null && q.low && q.low[i] != null)
-      b.push({ t, o: q.open && q.open[i] != null ? q.open[i] : q.close[i], h: q.high[i], l: q.low[i], c: q.close[i] });
-  });
-  const v = Object.assign({ id }, runBacktest(b, risk));
-  btCache.set(key, { t: now, v });
-  return v;
-}
-
-refreshNews();
-setInterval(refreshNews, NEWS_EVERY);
 
 http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://localhost');
@@ -436,19 +286,11 @@ http.createServer(async (req, res) => {
       if (!SYM[id]) return send(400, { error: 'unknown id' });
       return send(200, await history(id, iv));
     }
-    if (u.pathname === '/api/news') {
-      return send(200, { t: Math.floor(news.t / 1000), source: news.source, items: news.items });
-    }
+    if (u.pathname === '/api/news') return send(200, { items: news.items, src: news.src, updated: news.t, error: news.err });
     if (u.pathname === '/api/signal') {
-      const id = u.searchParams.get('id');
-      if (!SYM[id] || id === 'usdrub') return send(400, { error: 'unknown id' });
+      const id = u.searchParams.get('id') || 'eurusd';
+      if (!SYM[id]) return send(400, { error: 'unknown id' });
       return send(200, await signal(id));
-    }
-    if (u.pathname === '/api/backtest') {
-      const id = u.searchParams.get('symbol') || u.searchParams.get('id');
-      if (!SYM[id] || id === 'usdrub') return send(400, { error: 'unknown symbol' });
-      const risk = +clamp(parseFloat(u.searchParams.get('risk')) || 1, .1, 10).toFixed(2);
-      return send(200, await backtest(id, risk));
     }
     if (u.pathname === '/' || u.pathname === '/index.html') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -456,4 +298,4 @@ http.createServer(async (req, res) => {
     }
     res.writeHead(404); res.end();
   } catch (e) { send(502, { error: String(e.message) }); }
-}).listen(process.env.PORT || 3000, () => console.log('Открой http://localhost:' + (process.env.PORT || 3000) + (process.env.OPENROUTER_API_KEY ? '  (сигналы: OpenRouter)' : '  (сигналы: встроенный анализатор)')));
+}).listen(process.env.PORT || 3000, () => console.log('Открой http://localhost:' + (process.env.PORT || 3000)));

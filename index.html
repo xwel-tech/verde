@@ -32,7 +32,7 @@ h1{font-size:clamp(26px,3.4vw,38px);letter-spacing:-.03em;font-weight:800;line-h
 .pill{display:inline-block;padding:3px 12px;border-radius:99px;background:#2bd67b22;color:var(--g2);font-weight:700;font-size:13px}
 .sig.s{background:radial-gradient(120% 140% at 0% 0%,#e5604d44,var(--panel) 60%);border-color:#e5604d66}.sig.s .big,.big.s{color:var(--red)}.sig.s .pill{background:#e5604d22;color:var(--red)}
 .sig.w{background:radial-gradient(120% 140% at 0% 0%,#d9b64a33,var(--panel) 60%);border-color:#d9b64a66}.sig.w .big,.big.w{color:var(--amber)}.sig.w .pill{background:#d9b64a22;color:var(--amber)}
-.card .big{font-size:clamp(30px,4vw,44px)}
+.card .big{font-size:clamp(34px,5vw,52px)}
 .lv{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:20px}
 .lv div{background:#050a0799;border:1px solid var(--line);border-radius:12px;padding:10px 12px}
 .lv span{display:block;color:var(--mute);font-size:12px}
@@ -66,14 +66,13 @@ svg{display:block;width:100%;height:auto}
 .fld{background:var(--bg);margin-top:4px}
 label{display:block;color:var(--mute);font-size:12.5px;margin-top:10px}
 .hl{display:block;text-decoration:none;color:inherit}
-.nw{display:grid;grid-template-columns:58px minmax(0,1fr);gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}.nw:last-child{border:0}
-.nw time{display:block;font-weight:700;font-size:14px}.nw small{color:var(--mute);font-size:12px}.nw.new time{color:var(--g1)}
-.nw a,.nw p{color:var(--ink);text-decoration:none;font-weight:500;line-height:1.4;overflow-wrap:anywhere}.nw a:hover{color:var(--g2)}.nw a:focus-visible{outline:2px solid var(--g2);outline-offset:2px}
-.tg{display:inline-block;font-size:11px;font-weight:700;padding:1px 9px;border-radius:99px;background:#2bd67b22;color:var(--g2);margin:6px 6px 0 0}.tg.me{background:var(--g3);color:#fff}.tg.mk{background:var(--line);color:var(--mute)}
-.pulse{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--g1);margin-right:8px;vertical-align:middle;animation:pl 1.8s ease-in-out infinite}@keyframes pl{50%{opacity:.25}}
 .cbox{position:relative;height:320px}
 .tr{display:grid;grid-template-columns:1fr auto auto;gap:10px;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}.tr:last-child{border:0}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:99px;padding:2px;background:var(--panel)}.seg button{font:inherit;font-size:12px;font-weight:700;color:var(--mute);background:none;border:0;border-radius:99px;padding:5px 12px;min-height:32px;cursor:pointer}.seg button.on{background:var(--g3);color:#fff}
+.nw{display:grid;grid-template-columns:64px 1fr;gap:12px;padding:10px 0 10px 10px;border-bottom:1px solid var(--line);border-left:2px solid transparent}.nw.new{border-left-color:var(--g1)}.nw:last-child{border-bottom:0}
+.nt{font-weight:700;font-size:14px}.nt small{display:block;color:var(--mute);font-weight:400;font-size:11px}.ntx{font-size:14px;line-height:1.4}
+.ntg{display:flex;flex-wrap:wrap;gap:6px;margin-top:5px;align-items:center}.tg{font-size:11px;font-weight:700;padding:1px 8px;border-radius:99px;border:1px solid var(--line);color:var(--mute)}.tg.hit{color:var(--g2);border-color:var(--g3);background:#2bd67b22}.src{font-size:11px;color:var(--mute)}
+.ld{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--g1);margin-right:8px;animation:pl 1.6s infinite}@keyframes pl{50%{opacity:.3}}
 .col{min-width:0}.top,.tabs{display:none}
 @media(max-width:1100px){.charts{grid-template-columns:1fr 1fr}.charts>a:last-child{grid-column:1/-1}}
 @media(max-width:520px){.ar{gap:8px;grid-template-columns:40px minmax(0,1fr) 54px auto}}
@@ -96,7 +95,7 @@ main{padding:18px 16px 96px}
 .sub{margin-bottom:18px}.cbox{height:260px}
 }
 @media(max-width:380px){.tiles{grid-template-columns:1fr}}
-@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}.ld{animation:none}}
 </style>
 </head>
 <body>
@@ -110,7 +109,7 @@ main{padding:18px 16px 96px}
 /* ---------- данные интерфейса ---------- */
 const S=[["home","Главная","сводка",""],
 ["assets","Активы","список","Доллар, евро, золото, нефть и другие активы с поиском и избранным."],
-["signal","Сигнал","новости + цены","Сигнал по новостям и ценам: статус, уверенность, обоснование и Live-лента новостей."],
+["signal","Сигнал","купить / продать","Единый сигнал по трём графикам: направление, уверенность и причина."],
 ["entry","Точка входа","лучшая цена","Зона входа, найденная на пересечении паттерна актива, DXY и Brent."],
 ["risk","Тейк и стоп","уровни","Тейк-профиты, стоп-лосс и соотношение риска к прибыли."],
 ["patterns","Паттерны","распознавание","Найденные фигуры на графике актива: флаг, двойное дно, треугольник и другие."],
@@ -143,26 +142,12 @@ function getQ(ids){const need=ids.filter(i=>!age('q:'+i,TTLQ));if(!need.length)r
 function getH(id){const k='h:'+id+st.iv;if(age(k,TTLH))return Promise.resolve();
   return once(k,()=>J('/api/history?id='+id+'&iv='+st.iv).then(o=>{C[k]={t:Date.now(),v:o}}))}
 const Q=id=>C['q:'+id]&&C['q:'+id].v;
+const TTLN=30000,TTLS=60000;
+const getN=()=>age('n',TTLN)?Promise.resolve():once('n',()=>J('/api/news').then(o=>{C.n={t:Date.now(),v:o}}));
+const getS=id=>age('s:'+id,TTLS)?Promise.resolve():once('s:'+id,()=>J('/api/signal?id='+id).then(o=>{C['s:'+id]={t:Date.now(),v:o}}));
+const Sg=id=>C['s:'+id]&&C['s:'+id].v;
+const NW=()=>C.n&&C.n.v;
 const H=id=>{const c=C['h:'+id+st.iv];return c&&c.v.points.length?c.v.points:null};
-/* ---------- новости и сигнал (раз в минуту, отдельно от цен) ---------- */
-const TTLN=60000,esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-function getNews(){const t=[],c=cur,k='sg:'+c;
-  if(!age('news',TTLN))t.push(once('news',()=>J('/api/news').then(o=>{C.news={t:Date.now(),v:o}})));
-  if(!age(k,TTLN))t.push(once(k,()=>J('/api/signal?id='+c).then(o=>{C[k]={t:Date.now(),v:o}})));
-  return Promise.all(t.map(p=>p.catch(()=>0))).then(()=>t.length>0)}
-const NS=id=>C['sg:'+id]&&C['sg:'+id].v;
-function sigF(id){const x=sigOf(id);if(!x)return null;const n=NS(id);if(!n)return x;
-  const side=n.side>0?1:n.side<0?-1:0;return Object.assign({},x,{side,k:side>0?'b':side<0?'s':'w',conf:n.confidence,news:n,lv:levelsAt(x.q.price,side)})}
-const ago=t=>{const m=Math.max(0,Math.round((Date.now()/1000-t)/60));return{m,s:m<1?'сейчас':m<60?m+' мин':m<1440?Math.floor(m/60)+' ч':Math.floor(m/1440)+' д'}};
-const srcName=n=>n.source=='groq'?'ИИ-анализ (Groq)':'встроенный анализатор';
-const srcLine=x=>x&&x.news?`<p class='note' style='margin:8px 0 0'>${srcName(x.news)} · ${tm(x.news.t)}</p>`:'';
-const reasonCard=x=>`<div class='card' style='margin-top:16px'><div class='row'><h2>Обоснование сигнала</h2><span class='note' style='margin:0'>${x.news?srcName(x.news)+' · '+tm(x.news.t):''}</span></div>${x.news?`<p>${esc(x.news.reason)}</p>`:`<p class='sub' style='margin:0'>Новостной анализ ещё не получен — показана оценка только по графикам.</p>`}</div>`;
-function feed(max,more){const N=C.news&&C.news.v,it=N&&N.items||[];
-  const body=it.length?it.slice(0,max).map(n=>{const a=ago(n.t),tg=(n.tags||[]).filter(id=>AM[id]).map(id=>`<span class='tg${id==cur?' me':''}'>${AM[id].t}</span>`).join('')||`<span class='tg mk'>Рынок</span>`,ti=esc(n.title);
-    return `<div class='nw${a.m<15?' new':''}'><div><time>${tm(n.t)}</time><small>${a.s}</small></div><div>${/^https?:\/\//.test(n.link||'')?`<a href='${esc(n.link)}' target='_blank' rel='noopener noreferrer'>${ti}</a>`:`<p>${ti}</p>`}<div>${tg}</div></div></div>`}).join('')
-    :`<p class='sub' style='margin:0'>${net.s=='bad'?'Лента недоступна: нет связи с server.js.':'Новости загружаются…'}</p>`;
-  return `<div class='card' style='margin-top:16px'><div class='row'><h2><span class='pulse'></span>Live-лента новостей</h2><span class='note' style='margin:0'>${N&&N.source?esc(N.source)+(it.length?' · обновлено '+tm(N.t):''):''}</span></div><div class='feed'>${body}</div>${more&&it.length>max?`<p class='note' style='margin:10px 0 0'><a href='#signal' style='color:var(--g1)'>Вся лента — во вкладке «Сигнал»</a></p>`:''}</div>`}
-
 function route(){const r=(location.hash||'#home').slice(1);return S.some(s=>s[0]==r)||r=='menu'?r:'home'}
 function need(r){let q=[cur,'dxy','brent'],h=[cur,'dxy','brent'];
   if(r=='home')q=q.concat(favs);
@@ -170,7 +155,7 @@ function need(r){let q=[cur,'dxy','brent'],h=[cur,'dxy','brent'];
   if(r=='menu'||r=='settings'){q=[];h=[]}
   if(r=='dxy'){q=['dxy'];h=['dxy']}
   if(r=='brent'){q=['brent'];h=['brent']}
-  return{q:uniq(q.length?q.concat('usdrub'):q),h:uniq(h),n:r=='home'||r=='signal'}}
+  return{q:uniq(q.length?q.concat('usdrub'):q),h:uniq(h),n:r=='home'||r=='signal',s:['home','signal','entry','risk','history'].includes(r)?[cur]:[]}}
 
 /* ---------- математика и анализ ---------- */
 const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
@@ -214,9 +199,9 @@ function macro(id){const o={dm:null,bm:null,c1:null,c2:null,v:0};let num=0,den=0
 /* сигнал = 0,4·импульс (цена к открытию дня) + 0,3·паттерны + 0,3·макро (DXY и Brent с учётом корреляции) */
 function sigOf(id){const q=Q(id);if(!q)return null;const a=AM[id],c=closes(id),pl=c.length>=24?patterns(c,v=>P(id,v)):[];
   const mom=clamp(po(id)/sig(id),-1,1),pat=pl.length?clamp(mean(pl.map(x=>x.b)),-1,1):0,mac=macro(id);
-  const tot=mom*.4+pat*.3+mac.v*.3,side=tot>=.2?1:tot<=-.2?-1:0,conf=Math.round(Math.min(95,35+Math.abs(tot)*120));
+  const tot=mom*.4+pat*.3+mac.v*.3,tside=tot>=.2?1:tot<=-.2?-1:0,sv=Sg(id),side=sv?sv.side:tside,conf=sv?sv.confidence:Math.round(Math.min(95,35+Math.abs(tot)*120));
   const p=q.price,s=side||1;
-  return{id,a,q,c,pl,mom,pat,mac,tot,side,conf,k:side>0?'b':side<0?'s':'w',sg:sig(id),lv:{e:p,sl:p*(1-s*st.sl/100),t1:p*(1+s*st.t1/100),t2:p*(1+s*st.t2/100)}}}
+  return{id,a,q,c,pl,mom,pat,mac,tot,tside,sv,side,conf,k:side>0?'b':side<0?'s':'w',sg:sig(id),lv:{e:p,sl:p*(1-s*st.sl/100),t1:p*(1+s*st.t1/100),t2:p*(1+s*st.t2/100)}}}
 function levelsAt(e,side){const s=side||1;return{e,sl:e*(1-s*st.sl/100),t1:e*(1+s*st.t1/100),t2:e*(1+s*st.t2/100)}}
 function srOf(c,p,sg){if(c.length<12)return null;const k=Math.max(2,Math.round(c.length/30)),pv=pivots(c,k),lows=pv.lo.map(i=>c[i]).filter(v=>v<p),highs=pv.hi.map(i=>c[i]).filter(v=>v>p);
   return{sup:lows.length?Math.max(...lows):Math.min(...c),res:highs.length?Math.min(...highs):Math.max(...c)}}
@@ -274,38 +259,46 @@ function lvLines(x){return x&&x.side?[{l:'Вход',v:x.lv.e,c:'#7dffb3'},{l:'С
 const L=(x,k)=>x&&x.side?P(x.id,x.lv[k]):'—';
 const rr=()=>`1:${(st.t1/st.sl).toFixed(1).replace('.',',')} – 1:${(st.t2/st.sl).toFixed(1).replace('.',',')}`;
 
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function ago(ts){const m=Math.max(0,Math.round((Date.now()-ts)/60000));return m<1?'только что':m<60?m+' мин назад':Math.floor(m/60)+' ч назад'}
+const srcLabel=x=>x&&x.sv?(x.sv.source=='openrouter'?'ИИ OpenRouter + новости':x.sv.source=='groq'?'ИИ Groq + новости':'ключевые слова + новости'):'технический (без новостей)';
+function newsCard(n){const d=NW(),it=d&&d.items?d.items.slice(0,n):[];
+  const body=it.length?it.map(i=>`<div class='nw${Date.now()-i.ts<300000?' new':''}'><time class='nt'>${new Date(i.ts).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}<small>${ago(i.ts)}</small></time><div><div class='ntx'>${esc(i.title)}</div><div class='ntg'>${i.tags.map(t=>`<span class='tg${t==AM[cur].t?' hit':''}'>${esc(t)}</span>`).join('')}<span class='src'>${esc(i.src)}</span></div></div></div>`).join(''):`<p class='sub' style='margin:0'>${d?'Новости пока недоступны: источники не ответили.':'Загружаем новости…'}</p>`;
+  return `<div class='card' style='margin-top:16px'><div class='row'><h2><span class='ld'></span>Live-лента новостей</h2><span class='note' style='margin:0'>${d&&d.src?esc(d.src)+', ':''}обновление каждые 60 с</span></div>${body}</div>`}
+function reasonCard(x){const sv=x.sv;return `<div class='card' style='margin-top:16px'><div class='row'><h2>Обоснование</h2><span class='pill'>${sv?(sv.source=='openrouter'?'ИИ OpenRouter':sv.source=='groq'?'ИИ Groq':'Ключевые слова и корреляции'):'Технический расчёт'}</span></div><p>${esc(sv?sv.reason:'Решение по новостям ещё не получено, показан технический сигнал.')}</p></div>`}
+
 /* ---------- экраны ---------- */
-function home(){const x=sigF(cur),a=AM[cur],k=x?x.k:'w',D=dirOf('dxy'),B=dirOf('brent');
-  const why=x?(x.news?esc(x.news.reason):'Оценка только по графикам. Новостной анализ ещё не получен.'):'Ждём данные от server.js.';
+function home(){const x=sigOf(cur),a=AM[cur],k=x?x.k:'w',D=dirOf('dxy'),B=dirOf('brent');
+  const why=x?(x.sv?x.sv.reason:x.side?`Баланс факторов ${sgn(x.tot)}: импульс ${sgn(x.mom)}, паттерн ${sgn(x.pat)}, DXY и Brent ${sgn(x.mac.v)}.`:'Факторы расходятся — лучше подождать.'):'Ждём данные от server.js.';
   const title={b:'Сигнал на покупку',s:'Сигнал на продажу',w:'Нет чёткого сигнала'}[k];
   return badge()+`<h1>Где лучше входить сейчас</h1><p class='sub'>Выберите актив. Сайт сверит его с DXY и Brent и покажет вход, тейк и стоп.</p>`+chipsBar('data-id')+
-  `<div class='hero'><a href='#signal' class='hl'><div class='card sig ${k}'><div class='row'><span class='pill'>${x?title:'Загрузка'}</span><span style='color:var(--mute)'>${a.t}, ${st.iv}</span></div><div class='big' style='margin-top:16px'>${x?SG[k]:'—'}</div><p style='color:var(--mute);margin-top:6px'>${why}</p>${srcLine(x)}
+  `<div class='hero'><a href='#signal' class='hl'><div class='card sig ${k}'><div class='row'><span class='pill'>${x?title:'Загрузка'}</span><span style='color:var(--mute)'>${a.t}, ${st.iv}</span></div><div class='big' style='margin-top:16px'>${x?SG[k]:'—'}</div><p style='color:var(--mute);margin-top:6px'>${why}</p>
   <div class='lv'><div><span>Вход</span><b>${L(x,'e')}</b></div><div class='sl'><span>Стоп-лосс</span><b>${L(x,'sl')}</b></div><div class='tp'><span>Тейк 1</span><b>${L(x,'t1')}</b></div><div class='tp'><span>Тейк 2</span><b>${L(x,'t2')}</b></div></div></div></a>
   <div class='card'><h2>Уверенность сигнала</h2><div class='row'><b style='font-size:34px;color:var(--g2)'>${x?x.conf+'%':'—'}</b><span style='color:var(--mute)'>риск/прибыль ${x&&x.side?rr():'—'}</span></div><div class='bar'><i style='width:${x?x.conf:0}%'></i></div>
-  <div style='margin-top:14px'>${kv('Паттерн',x&&x.pl.length?x.pl[0].n:'—')}${kv('DXY',D[0],D[1])}${kv('Brent',B[0],B[1])}</div></div></div>`+
-  feed(6,1)+`<div class='charts'>${cc(cur,'entry',x&&x.side?lvLines(x).map(l=>({v:l.v,c:l.c,dash:l.dash})):null)}${cc('dxy','dxy')}${cc('brent','brent')}</div>`+
+  <div style='margin-top:14px'>${kv('Паттерн',x&&x.pl.length?x.pl[0].n:'—')}${kv('DXY',D[0],D[1])}${kv('Brent',B[0],B[1])}${kv('Анализ',srcLabel(x))}</div></div></div>`+
+  `<div class='charts'>${cc(cur,'entry',x&&x.side?lvLines(x).map(l=>({v:l.v,c:l.c,dash:l.dash})):null)}${cc('dxy','dxy')}${cc('brent','brent')}</div>`+newsCard(8)+
   `<div class='row' style='margin-top:28px'><h2>Мои активы</h2><a href='#assets' style='color:var(--g1);font-weight:600;text-decoration:none'>Все активы</a></div><div class='list'>${favs.map(row).join('')||'<p class="sub">Добавьте активы в избранное звёздочкой.</p>'}</div>`+
-  `<h2 style='margin-top:28px'>Разделы</h2><div class='tiles'>${S.slice(2).map(s=>`<button class='tile' onclick="location.hash='${s[0]}'"><b>${s[1]}</b><span>${s[3]}</span></button>`).join('')}</div><p class='note'>Данные: Yahoo Finance через server.js, обновление каждые 15 секунд. Новости: FinancialJuice (резерв: Investing, ForexLive), раз в минуту. Сигналы считаются по формуле сайта и не являются финансовой рекомендацией.</p>`}
+  `<h2 style='margin-top:28px'>Разделы</h2><div class='tiles'>${S.slice(2).map(s=>`<button class='tile' onclick="location.hash='${s[0]}'"><b>${s[1]}</b><span>${s[3]}</span></button>`).join('')}</div><p class='note'>Данные: Yahoo Finance через server.js, обновление каждые 15 секунд. Сигналы считаются по формуле сайта и не являются финансовой рекомендацией.</p>`}
 
 function assets(){return badge()+`<h1>Активы</h1><p class='sub'>Нажмите на актив, чтобы увидеть по нему сигнал. Звёздочка добавляет актив в избранное на главной. Метка рядом с тикером показывает положение цены относительно открытия дня.</p><input id='qs' class='search' type='search' placeholder='Найти: золото, EUR/USD, нефть' aria-label='Поиск актива'><div class='chips'>${CATS.map(c=>`<button class='chip${c[0]==cat?' on':''}' data-cat='${c[0]}'>${c[1]}</button>`).join('')}</div><div id='alist' class='list'></div>`}
 function fillList(){const s=qs.toLowerCase(),l=A.filter(a=>(cat=='all'||(cat=='fav'?favs.includes(a[0]):a[3]==cat))&&(a[1]+' '+a[2]).toLowerCase().includes(s));$('alist').innerHTML=l.length?l.map(a=>row(a[0])).join(''):'<p class="sub">Ничего не найдено. Сбросьте фильтр или поиск.</p>'}
 function initAssets(){const i=$('qs');i.value=qs;i.addEventListener('input',()=>{qs=i.value;fillList()});fillList()}
 function menu(){return `<h1>Все разделы</h1><p class='sub'>Выберите, что открыть.</p><div class='tiles'>${S.slice(1).map(s=>`<button class='tile' onclick="location.hash='${s[0]}'"><b>${s[1]}</b><span>${s[3]}</span></button>`).join('')}</div>`}
 
-function pSignal(){const x=sigF(cur);if(!x)return'<div class="card"><p class="sub">Нет данных по активу.</p></div>';
+function pSignal(){const x=sigOf(cur);if(!x)return'<div class="card"><p class="sub">Нет данных по активу.</p></div>';
   const ch1=priceChart(cur,lvLines(x));
   return ch1+`<div class='grid3'>${cd('Решение',`<div class='big ${x.k}'>${SG[x.k]}</div><div class='row' style='margin-top:10px'><span class='mute'>Уверенность</span><b>${x.conf}%</b></div><div class='bar'><i style='width:${x.conf}%'></i></div>`)}
-  ${cd('Технические факторы',kv('Импульс (цена к открытию дня)',sgn(x.mom),x.mom>=0?'up':'dn','вес 40%')+kv('Паттерн',sgn(x.pat),x.pat>=0?'up':'dn','вес 30%')+kv('DXY и Brent',sgn(x.mac.v),x.mac.v>=0?'up':'dn','вес 30%, с учётом корреляции')+kv('Итог',sgn(x.tot),x.tot>=0?'up':'dn','порог ±0,20'))}
-  ${cd('Уровни',kv('Вход',L(x,'e'))+kv('Стоп-лосс (−'+st.sl+'%)',L(x,'sl'),'dn')+kv('Тейк 1 (+'+st.t1+'%)',L(x,'t1'),'up')+kv('Тейк 2 (+'+st.t2+'%)',L(x,'t2'),'up')+kv('Риск/прибыль',x.side?rr():'—'))}</div>`+reasonCard(x)+feed(15)}
+  ${cd('Из чего сложился сигнал',kv('Импульс (цена к открытию дня)',sgn(x.mom),x.mom>=0?'up':'dn','вес 40%')+kv('Паттерн',sgn(x.pat),x.pat>=0?'up':'dn','вес 30%')+kv('DXY и Brent',sgn(x.mac.v),x.mac.v>=0?'up':'dn','вес 30%, с учётом корреляции')+kv('Технический итог',sgn(x.tot),x.tot>=0?'up':'dn','порог ±0,20'))}
+  ${cd('Уровни',kv('Вход',L(x,'e'))+kv('Стоп-лосс (−'+st.sl+'%)',L(x,'sl'),'dn')+kv('Тейк 1 (+'+st.t1+'%)',L(x,'t1'),'up')+kv('Тейк 2 (+'+st.t2+'%)',L(x,'t2'),'up')+kv('Риск/прибыль',x.side?rr():'—'))}</div>`+reasonCard(x)+newsCard(15)}
 
-function pEntry(){const x=sigF(cur);if(!x)return'<div class="card"><p class="sub">Нет данных по активу.</p></div>';const e=entryOf(x),d=v=>P(x.id,v);
+function pEntry(){const x=sigOf(cur);if(!x)return'<div class="card"><p class="sub">Нет данных по активу.</p></div>';const e=entryOf(x),d=v=>P(x.id,v);
   const ex=e?[{l:'Поддержка',v:e.sup,c:'#2bd67b',dash:1},{l:'Сопротивление',v:e.res,c:'#e5604d',dash:1}].concat(e.e!=null?[{l:'Точка входа',v:e.e,c:'#7dffb3'}]:[]):[];
   const lv=e&&e.e!=null?levelsAt(e.e,x.side):null,dd=e&&e.e!=null?(e.e/x.q.price-1)*100:null,c1=x.mac.c1,c2=x.mac.c2,D=dirOf('dxy'),B=dirOf('brent');
   return priceChart(cur,ex)+`<div class='grid3'>${cd('Лучшая точка входа',e&&e.e!=null?kv('Сторона',x.side>0?'покупка':'продажа',x.side>0?'up':'dn')+kv('Тип',e.mkt?'по рынку':'лимитный ордер')+kv('Цена входа',d(e.e))+kv('От текущей цены',pc(dd))+kv('Стоп / Тейк 1',d(lv.sl)+' / '+d(lv.t1)):'<p class="sub" style="margin:0">Сигнала нет, точка входа не рассчитывается. Ждём совпадения факторов.</p>')}
   ${cd('Уровни рядом',kv('Поддержка',e?d(e.sup):'—','up',e?pc((e.sup/x.q.price-1)*100)+' от цены':'')+kv('Сопротивление',e?d(e.res):'—','dn',e?pc((e.res/x.q.price-1)*100)+' от цены':'')+kv('Текущая цена',d(x.q.price)))}
   ${cd('Подтверждение',kv('DXY',D[0],D[1],c1==null?'':'корреляция '+fmt(c1,2))+kv('Brent',B[0],B[1],c2==null?'':'корреляция '+fmt(c2,2))+kv('Паттерн',x.pl.length?x.pl[0].n:'—'))}</div>`}
 
-function pRisk(){const x=sigF(cur);if(!x)return'<div class="card"><p class="sub">Нет данных по активу.</p></div>';const ok=x.side!=0,okp=ok&&isCv(x.id),rs=st.dep*st.risk/100,dist=Math.abs(x.lv.e-x.lv.sl),u=dist?rs/dist:0;
+function pRisk(){const x=sigOf(cur);if(!x)return'<div class="card"><p class="sub">Нет данных по активу.</p></div>';const ok=x.side!=0,okp=ok&&isCv(x.id),rs=st.dep*st.risk/100,dist=Math.abs(x.lv.e-x.lv.sl),u=dist?rs/dist:0;
   return priceChart(cur,lvLines(x))+`<div class='grid3'>${cd('Стоп-лосс',kv('Цена',L(x,'sl'),'dn')+kv('Расстояние','−'+st.sl+'%')+kv('Потеря при срабатывании',ok?'−'+M(rs):'—','dn',st.risk+'% от депозита '+M(st.dep)))}
   ${cd('Тейк-профиты',kv('Тейк 1',L(x,'t1'),'up',ok?'прибыль '+M(rs*st.t1/st.sl):'')+kv('Тейк 2',L(x,'t2'),'up',ok?'прибыль '+M(rs*st.t2/st.sl):'')+kv('Риск/прибыль',ok?rr():'—'))}
   ${cd('Размер позиции',kv('Количество',okp?fmt(u,u>=100?0:3):'—','',x.a.t)+kv('Объём позиции',okp?M(u*x.lv.e):'—')+kv('Риск на сделку',st.risk+'%','','меняется в настройках'))}</div>`}
@@ -352,9 +345,11 @@ function render(keep){const ae=document.activeElement;if(keep&&ae&&/INPUT|SELECT
   $('ttl').textContent=s[0]=='home'?'Верде':s[1];$('live').className='live '+net.s;$('live').textContent={ok:'онлайн',load:'загрузка',bad:'нет связи'}[net.s];$('curb').innerHTML=curBtn();
   const y=window.scrollY;$('main').innerHTML=s[0]=='home'?home():s[0]=='menu'?menu():s[0]=='assets'?assets():page(s);
   if(post)post();if(s[0]=='assets')initAssets();window.scrollTo(0,keep?y:0)}
-function refresh(keep){const n=need(route()),ns=n.n?getNews():Promise.resolve(false),
-  pr=!n.q.length&&!n.h.length?Promise.resolve():Promise.all([getQ(n.q)].concat(n.h.map(getH))).then(()=>{net={s:n.q.length&&!n.q.some(Q)?'bad':'ok',t:Date.now()}},()=>{net.s='bad'});
-  return pr.then(()=>render(keep)).then(()=>ns).then(fresh=>{if(fresh)render(keep)})}
+function refresh(keep){const n=need(route());if(!n.q.length&&!n.h.length&&!n.n){render(keep);return Promise.resolve()}
+  const ex=[].concat(n.n?[getN()]:[],n.s.map(getS)).map(p=>p.catch(()=>{}));
+  const main=Promise.all([getQ(n.q)].concat(n.h.map(getH))).then(()=>{net={s:n.q.length&&!n.q.some(Q)?'bad':'ok',t:Date.now()}},()=>{net.s='bad'});
+  Promise.all(ex).then(()=>render(true));   // новости и сигнал могут идти дольше: цены не ждут
+  return main.then(()=>render(keep))}
 function go(){render();refresh()}
 function pick(id){cur=id;save();if(route()=='home')go();else location.hash='home'}
 function tog(id){const i=favs.indexOf(id);if(i>-1)favs.splice(i,1);else favs.push(id);save();const y=window.scrollY;render();window.scrollTo(0,y)}
