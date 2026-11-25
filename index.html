@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Верде — анализ входа по DXY и Brent</title>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#050a07;--bg2:#0a120d;--panel:#0e1a13;--line:#1b3126;--ink:#e6f5ec;--mute:#7f9a8a;--g1:#2bd67b;--g2:#7dffb3;--g3:#14803f;--red:#e5604d;--amber:#d9b64a;color-scheme:dark;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box;margin:0}
+body{background:var(--bg);color:var(--ink);font:400 15px/1.55 Manrope,system-ui,-apple-system,"Segoe UI",sans-serif;font-variant-numeric:tabular-nums;min-height:100vh}
+.app{display:grid;grid-template-columns:240px 1fr;min-height:100vh}
+nav{background:var(--bg2);border-right:1px solid var(--line);padding:22px 14px;position:sticky;top:0;height:100vh;overflow:auto}
+.brand{font-weight:800;font-size:20px;letter-spacing:-.02em;padding:0 10px 18px;display:flex;gap:10px;align-items:center}
+.brand i{width:22px;height:22px;border-radius:6px;background:linear-gradient(135deg,var(--g2),var(--g3));display:block}
+nav a{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border-radius:10px;color:var(--mute);text-decoration:none;font-weight:500;margin-bottom:2px;cursor:pointer}
+nav a:hover{background:var(--panel);color:var(--ink)}
+nav a.on{background:linear-gradient(90deg,#14803f55,transparent);color:var(--g2);box-shadow:inset 2px 0 var(--g1)}
+nav a:focus-visible,.tile:focus-visible,button:focus-visible{outline:2px solid var(--g2);outline-offset:2px}
+nav small{font-size:11px;color:var(--g1)}
+nav hr{border:0;border-top:1px solid var(--line);margin:12px 6px}
+main{padding:28px clamp(16px,3vw,40px) 60px;max-width:1180px;width:100%}
+h1{font-size:clamp(26px,3.4vw,38px);letter-spacing:-.03em;font-weight:800;line-height:1.1}
+.sub{color:var(--mute);margin:6px 0 24px;max-width:60ch}
+.demo{display:inline-block;font-size:12px;color:var(--amber);border:1px solid #d9b64a55;border-radius:99px;padding:2px 10px;margin-bottom:14px}
+.demo.ok{color:var(--g1);border-color:#2bd67b55}.demo.bad{color:var(--red);border-color:#e5604d55}
+.hero{display:grid;grid-template-columns:1.25fr 1fr;gap:16px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px}
+.sig{background:radial-gradient(120% 140% at 0% 0%,#14803f66,var(--panel) 60%);border-color:#2bd67b66}
+.sig .big,.big{font-size:clamp(44px,7vw,72px);font-weight:800;letter-spacing:-.04em;color:var(--g2);line-height:1}
+.pill{display:inline-block;padding:3px 12px;border-radius:99px;background:#2bd67b22;color:var(--g2);font-weight:700;font-size:13px}
+.sig.s{background:radial-gradient(120% 140% at 0% 0%,#e5604d44,var(--panel) 60%);border-color:#e5604d66}.sig.s .big,.big.s{color:var(--red)}.sig.s .pill{background:#e5604d22;color:var(--red)}
+.sig.w{background:radial-gradient(120% 140% at 0% 0%,#d9b64a33,var(--panel) 60%);border-color:#d9b64a66}.sig.w .big,.big.w{color:var(--amber)}.sig.w .pill{background:#d9b64a22;color:var(--amber)}
+.card .big{font-size:clamp(34px,5vw,52px)}
+.lv{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:20px}
+.lv div{background:#050a0799;border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.lv span{display:block;color:var(--mute);font-size:12px}
+.lv b{font-size:18px}.sl b{color:var(--red)}.tp b{color:var(--g1)}
+.bar{height:8px;background:var(--line);border-radius:9px;overflow:hidden;margin-top:6px}
+.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--g3),var(--g2))}
+.row{display:flex;justify-content:space-between;gap:10px;align-items:center}
+h2{font-size:17px;font-weight:700;margin-bottom:10px}
+.charts{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:16px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:14px;margin-top:16px}
+.tile{display:block;text-align:left;font:inherit;color:inherit;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;cursor:pointer;width:100%;transition:border-color .15s,transform .15s}
+.tile:hover{border-color:var(--g1);transform:translateY(-2px)}
+.tile b{display:block;font-size:16px;margin-bottom:4px}.tile span{color:var(--mute);font-size:13px}
+svg{display:block;width:100%;height:auto}
+.chg{font-weight:700}.up{color:var(--g1)}.dn{color:var(--red)}.wt{color:var(--amber)}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:16px}
+.kv{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}.kv:last-child{border:0}.kv>span,.kv small{color:var(--mute)}.kv small{display:block;font-size:12px}
+.note{color:var(--mute);font-size:12.5px;margin-top:28px;max-width:70ch}
+.chips{display:flex;gap:8px;overflow-x:auto;padding:2px 0 12px;margin-bottom:6px;scrollbar-width:none;-webkit-overflow-scrolling:touch}.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;font:inherit;font-weight:600;font-size:14px;color:var(--mute);background:var(--panel);border:1px solid var(--line);border-radius:99px;padding:9px 16px;min-height:40px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center}
+.chip:hover{color:var(--ink);border-color:var(--g3)}.chip.on{background:var(--g3);border-color:var(--g1);color:#fff}.chip.more{color:var(--g2);border-style:dashed}
+.chip:focus-visible,.ar:focus-visible,.star:focus-visible,.search:focus-visible,.fld:focus-visible{outline:2px solid var(--g2);outline-offset:2px}
+.list{display:flex;flex-direction:column;gap:8px}
+.ar{display:grid;grid-template-columns:40px minmax(0,1.4fr) minmax(60px,1fr) auto;gap:12px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:10px 14px 10px 6px;cursor:pointer;min-height:64px}
+.ar:hover{border-color:var(--g1)}
+.star{width:40px;height:40px;border:0;background:none;color:var(--line);font-size:20px;cursor:pointer;border-radius:10px}.star:hover{color:var(--mute)}.star.on{color:var(--amber)}
+.an b{display:block;font-weight:700;line-height:1.25}.an span{font-size:12.5px;color:var(--mute)}
+.an em{font-style:normal;font-weight:700;margin-left:8px}.an em.b{color:var(--g1)}.an em.s{color:var(--red)}.an em.w{color:var(--amber)}
+.sp svg{height:28px}.ap{text-align:right}.ap b{display:block}
+.search,.fld{width:100%;font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;min-height:46px}.search{margin-bottom:12px}
+.fld{background:var(--bg);margin-top:4px}
+label{display:block;color:var(--mute);font-size:12.5px;margin-top:10px}
+.hl{display:block;text-decoration:none;color:inherit}
+.cbox{position:relative;height:320px}
+.tr{display:grid;grid-template-columns:1fr auto auto;gap:10px;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}.tr:last-child{border:0}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:99px;padding:2px;background:var(--panel)}.seg button{font:inherit;font-size:12px;font-weight:700;color:var(--mute);background:none;border:0;border-radius:99px;padding:5px 12px;min-height:32px;cursor:pointer}.seg button.on{background:var(--g3);color:#fff}
+.col{min-width:0}.top,.tabs{display:none}
+@media(max-width:1100px){.charts{grid-template-columns:1fr 1fr}.charts>a:last-child{grid-column:1/-1}}
+@media(max-width:520px){.ar{gap:8px;grid-template-columns:40px minmax(0,1fr) 54px auto}}
+@media(max-width:900px){
+.app{grid-template-columns:1fr}nav{display:none}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);background:#050a07;z-index:25}
+.top{display:flex;align-items:center;gap:10px;position:sticky;top:env(safe-area-inset-top,0px);z-index:20;padding:12px 16px;background:#050a07ee;backdrop-filter:blur(10px);border-bottom:1px solid var(--line);font-weight:800;font-size:17px}
+.top i{width:18px;height:18px;border-radius:5px;background:linear-gradient(135deg,var(--g2),var(--g3))}
+.top .seg{margin-left:auto}.top .live{margin-left:0;font-size:11px;font-weight:600;color:var(--amber);border:1px solid #d9b64a55;border-radius:99px;padding:1px 9px}
+.top .live.ok{color:var(--g1);border-color:#2bd67b55}.top .live.bad{color:var(--red);border-color:#e5604d55}
+.tabs{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:30;background:#0a120df2;backdrop-filter:blur(12px);border-top:1px solid var(--line);padding:6px 6px calc(6px + env(safe-area-inset-bottom,0px))}
+.tabs a{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;min-height:54px;justify-content:center;border-radius:12px;color:var(--mute);text-decoration:none;font-size:11px;font-weight:600}
+.tabs a svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.tabs a.on{color:var(--g2);background:#14803f33}
+.tabs a:focus-visible{outline:2px solid var(--g2)}
+main{padding:18px 16px 96px}
+.hero,.grid3,.charts{grid-template-columns:1fr}.charts>a:last-child{grid-column:auto}
+.lv{grid-template-columns:repeat(2,1fr)}.card{padding:16px}
+.tiles{grid-template-columns:1fr 1fr;gap:10px}.tile{padding:14px;min-height:96px}
+.sub{margin-bottom:18px}.cbox{height:260px}
+}
+@media(max-width:380px){.tiles{grid-template-columns:1fr}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="app">
+<nav id="nav" aria-label="Разделы"></nav>
+<div class="col"><header class="top"><i></i><b id="ttl">Верде</b><span id="curb"></span><span class="live" id="live">загрузка</span></header><main id="main"></main></div>
+<div class="tabs" id="tabs" aria-label="Быстрая навигация"></div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+/* ---------- данные интерфейса ---------- */
+const S=[["home","Главная","сводка",""],
+["assets","Активы","список","Доллар, евро, золото, нефть и другие активы с поиском и избранным."],
+["signal","Сигнал","купить / продать","Единый сигнал по трём графикам: направление, уверенность и причина."],
+["entry","Точка входа","лучшая цена","Зона входа, найденная на пересечении паттерна актива, DXY и Brent."],
+["risk","Тейк и стоп","уровни","Тейк-профиты, стоп-лосс и соотношение риска к прибыли."],
+["patterns","Паттерны","распознавание","Найденные фигуры на графике актива: флаг, двойное дно, треугольник и другие."],
+["dxy","Индекс DXY","доллар","Тренд и ключевые уровни индекса доллара."],
+["brent","Нефть Brent","сырьё","Тренд и ключевые уровни нефти Brent."],
+["corr","Корреляция","3 графика","Как актив, DXY и Brent движутся относительно друг друга."],
+["history","История","сигналы","Сигналы по правилу сайта за текущую торговую сессию и их результат."],
+["settings","Настройки","риск, таймфрейм","Таймфрейм, уровни стопа и тейков, депозит и риск на сделку."]];
+const T=[["home","Главная","M3 11l9-8 9 8v10H3z"],["assets","Активы","M4 6h16M4 12h16M4 18h10"],["signal","Сигнал","M3 17l6-6 4 4 8-9"],["entry","Вход","M12 3v18M3 12h18"],["menu","Ещё","M4 7h16M4 12h16M4 17h16"]];
+const A=[['dxy','Доллар (индекс)','DXY','cur',2],['eurusd','Евро / Доллар','EUR/USD','cur',4],['gbpusd','Фунт / Доллар','GBP/USD','cur',4],['usdjpy','Доллар / Иена','USD/JPY','cur',2],['usdchf','Доллар / Франк','USD/CHF','cur',4],['audusd','Австр. доллар / Доллар','AUD/USD','cur',4],['xau','Золото','XAU/USD','met',2],['xag','Серебро','XAG/USD','met',2],['brent','Нефть Brent','BRENT','en',2],['wti','Нефть WTI','WTI','en',2],['ng','Природный газ','NG','en',3],['spx','S&P 500','SPX','idx',0],['ndx','Nasdaq 100','NDX','idx',0],['dax','DAX 40','DAX','idx',0],['btc','Биткоин','BTC/USD','cry',0],['eth','Эфир','ETH/USD','cry',2]];
+const CATS=[['all','Все'],['fav','Избранное'],['cur','Валюты'],['met','Металлы'],['en','Энергия'],['idx','Индексы'],['cry','Крипто']];
+const AM={};A.forEach(a=>AM[a[0]]={id:a[0],n:a[1],t:a[2],c:a[3],d:a[4]});
+const SG={b:'КУПИТЬ',s:'ПРОДАТЬ',w:'ЖДАТЬ'},SL={b:'покупка',s:'продажа',w:'ждать'};
+const $=id=>document.getElementById(id);
+
+/* ---------- состояние ---------- */
+let curr='USD',cur='eurusd',cat='all',qs='',favs=['dxy','eurusd','xau','brent','btc'],st={sl:.5,t1:.8,t2:1.5,dep:10000,risk:1,iv:'15m'};
+let net={s:'load',t:0},post=null,ch=null;
+try{const sv=JSON.parse(localStorage.getItem('verde2'));if(sv){if(AM[sv.c])cur=sv.c;if(sv.f)favs=sv.f;if(sv.u=='RUB')curr='RUB';Object.assign(st,sv.s||{})}}catch(e){}
+function save(){try{localStorage.setItem('verde2',JSON.stringify({c:cur,f:favs,s:st,u:curr}))}catch(e){}}
+
+/* ---------- слой данных: кэш в памяти (котировки 15 с, история 60 с) ---------- */
+const TTLQ=15000,TTLH=60000,C={},F={};
+const age=(k,ttl)=>C[k]&&Date.now()-C[k].t<ttl;
+const J=u=>fetch(u).then(r=>{if(!r.ok)throw new Error(r.status);return r.json()});
+const uniq=a=>a.filter((v,i)=>a.indexOf(v)===i);
+function once(k,fn){if(!F[k])F[k]=fn().then(v=>{delete F[k];return v},e=>{delete F[k];throw e});return F[k]}
+function getQ(ids){const need=ids.filter(i=>!age('q:'+i,TTLQ));if(!need.length)return Promise.resolve();
+  return once('q'+need.join(),()=>J('/api/quote?ids='+need.join(',')).then(o=>need.forEach(i=>{if(o[i])C['q:'+i]={t:Date.now(),v:o[i]}})))}
+function getH(id){const k='h:'+id+st.iv;if(age(k,TTLH))return Promise.resolve();
+  return once(k,()=>J('/api/history?id='+id+'&iv='+st.iv).then(o=>{C[k]={t:Date.now(),v:o}}))}
+const Q=id=>C['q:'+id]&&C['q:'+id].v;
+const H=id=>{const c=C['h:'+id+st.iv];return c&&c.v.points.length?c.v.points:null};
+function route(){const r=(location.hash||'#home').slice(1);return S.some(s=>s[0]==r)||r=='menu'?r:'home'}
+function need(r){let q=[cur,'dxy','brent'],h=[cur,'dxy','brent'];
+  if(r=='home')q=q.concat(favs);
+  if(r=='assets'){q=A.map(a=>a[0]);h=[]}
+  if(r=='menu'||r=='settings'){q=[];h=[]}
+  if(r=='dxy'){q=['dxy'];h=['dxy']}
+  if(r=='brent'){q=['brent'];h=['brent']}
+  return{q:uniq(q.length?q.concat('usdrub'):q),h:uniq(h)}}
+
+/* ---------- математика и анализ ---------- */
+const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+const mean=a=>a.reduce((x,y)=>x+y,0)/(a.length||1);
+const sd=a=>{const m=mean(a);return Math.sqrt(mean(a.map(x=>(x-m)*(x-m))))};
+const rets=c=>{const r=[];for(let i=1;i<c.length;i++)r.push((c[i]/c[i-1]-1)*100);return r};
+const fmt=(v,d)=>v==null||isNaN(v)?'—':v.toLocaleString('ru-RU',{minimumFractionDigits:d,maximumFractionDigits:d});
+const sgn=(v,g=2)=>v==null||isNaN(v)?'—':(v>=0?'+':'−')+Math.abs(v).toFixed(g).replace('.',',');
+const pc=v=>v==null?'—':sgn(v)+'%';
+const tm=t=>new Date(t*1000).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
+function pivots(c,k){const lo=[],hi=[];for(let i=k;i<c.length-k;i++){const w=c.slice(i-k,i+k+1);if(c[i]==Math.min(...w))lo.push(i);if(c[i]==Math.max(...w))hi.push(i)}return{lo,hi}}
+function reg(y){const n=y.length,mx=(n-1)/2,my=mean(y);let sxy=0,sxx=0,syy=0;y.forEach((v,i)=>{sxy+=(i-mx)*(v-my);sxx+=(i-mx)*(i-mx);syy+=(v-my)*(v-my)});return{slope:sxx?sxy/sxx:0,r2:sxx&&syy?sxy*sxy/(sxx*syy):0,my}}
+const closes=id=>{const h=H(id);return h?h.map(p=>p[1]):[]};
+const po=id=>{const q=Q(id);return q&&q.open?(q.price/q.open-1)*100:null};
+function sig(id){const c=closes(id);return Math.max(c.length>10?sd(rets(c))*Math.sqrt(c.length):.6,.05)}
+function corr(a,b){const x=H(a),y=H(b);if(!x||!y)return null;const m=new Map(y),xa=[],ya=[];x.forEach(p=>{if(m.has(p[0])){xa.push(p[1]);ya.push(m.get(p[0]))}});if(xa.length<12)return null;
+  const r1=rets(xa),r2=rets(ya),mx=mean(r1),my=mean(r2);let sxy=0,sxx=0,syy=0;for(let i=0;i<r1.length;i++){sxy+=(r1[i]-mx)*(r2[i]-my);sxx+=(r1[i]-mx)**2;syy+=(r2[i]-my)**2}return sxx&&syy?sxy/Math.sqrt(sxx*syy):null}
+function align(ids){const hs=ids.map(H);if(hs.some(x=>!x))return null;let ts=hs[0].map(p=>p[0]);hs.slice(1).forEach(h=>{const s=new Set(h.map(p=>p[0]));ts=ts.filter(t=>s.has(t))});if(ts.length<5)return null;return{ts,v:hs.map(h=>{const m=new Map(h);return ts.map(t=>m.get(t))})}}
+
+function patterns(c,d){const n=c.length,out=[];if(n<24)return out;const p=c[n-1],k=Math.max(2,Math.round(n/30)),pv=pivots(c,k),lo=pv.lo,hi=pv.hi,sgw=Math.max(sd(rets(c))*Math.sqrt(n),.05);
+  if(lo.length>=2){const a=lo[lo.length-2],b=lo[lo.length-1];if(b-a>=5&&Math.abs(c[a]/c[b]-1)<.0035&&Math.max(...c.slice(a,b+1))/c[b]-1>.004&&p>c[b])out.push({n:'Двойное дно',b:1,d:'минимумы '+d(c[a])+' и '+d(c[b])+', цена выше'})}
+  if(hi.length>=2){const a=hi[hi.length-2],b=hi[hi.length-1];if(b-a>=5&&Math.abs(c[a]/c[b]-1)<.0035&&1-Math.min(...c.slice(a,b+1))/c[b]>.004&&p<c[b])out.push({n:'Двойная вершина',b:-1,d:'максимумы '+d(c[a])+' и '+d(c[b])+', цена ниже'})}
+  if(lo.length>=2&&hi.length>=2){const l1=lo[lo.length-2],l2=lo[lo.length-1],h1=hi[hi.length-2],h2=hi[hi.length-1];
+    if(l2-l1>=4&&h2-h1>=4&&Math.max(l2,h2)>n*.6){const sl=(c[l2]-c[l1])/(l2-l1)*n/p*100,sh=(c[h2]-c[h1])/(h2-h1)*n/p*100,f=.2*sgw;
+      if(Math.abs(sh)<f&&sl>f)out.push({n:'Восходящий треугольник',b:1,d:'плоское сопротивление, растущие минимумы'});
+      else if(Math.abs(sl)<f&&sh<-f)out.push({n:'Нисходящий треугольник',b:-1,d:'плоская поддержка, падающие максимумы'});
+      else if(sh<-f&&sl>f)out.push({n:'Симметричный треугольник',b:0,d:'диапазон сужается, ждём пробоя'})}}
+  const i60=Math.floor(n*.6),mv=(c[i60]/c[0]-1)*100,tail=c.slice(i60),rg=reg(tail);
+  if(Math.abs(mv)>1.2*sgw){const imp=c[i60]-c[0],ret=mv>0?(c[i60]-Math.min(...tail))/imp:(Math.max(...tail)-c[i60])/imp;
+    if(ret>.1&&ret<.5&&(mv>0?rg.slope<0:rg.slope>0))out.push({n:mv>0?'Бычий флаг':'Медвежий флаг',b:mv>0?1:-1,d:'импульс '+sgn(mv)+'%, откат '+Math.round(ret*100)+'%'})}
+  const r=reg(c),tot=r.slope*n/r.my*100;
+  if(r.r2>.55&&Math.abs(tot)>.8*sgw)out.push({n:tot>0?'Восходящий тренд':'Нисходящий тренд',b:tot>0?1:-1,d:'ход окна '+sgn(tot)+'%, R² '+r.r2.toFixed(2).replace('.',',')});
+  else if(!out.length)out.push({n:'Боковик',b:0,d:'чёткой фигуры нет'});
+  return out}
+
+function macro(id){const o={dm:null,bm:null,c1:null,c2:null,v:0};let num=0,den=0;
+  if(id!='dxy'&&Q('dxy')&&H('dxy')){o.c1=corr(id,'dxy');o.dm=clamp(po('dxy')/sig('dxy'),-1,1);if(o.c1!=null){num+=o.c1*o.dm;den+=Math.abs(o.c1)}}
+  if(id!='brent'&&Q('brent')&&H('brent')){o.c2=corr(id,'brent');o.bm=clamp(po('brent')/sig('brent'),-1,1);if(o.c2!=null){num+=o.c2*o.bm;den+=Math.abs(o.c2)}}
+  o.v=den>.05?clamp(num/den,-1,1):0;return o}
+
+/* сигнал = 0,4·импульс (цена к открытию дня) + 0,3·паттерны + 0,3·макро (DXY и Brent с учётом корреляции) */
+function sigOf(id){const q=Q(id);if(!q)return null;const a=AM[id],c=closes(id),pl=c.length>=24?patterns(c,v=>P(id,v)):[];
+  const mom=clamp(po(id)/sig(id),-1,1),pat=pl.length?clamp(mean(pl.map(x=>x.b)),-1,1):0,mac=macro(id);
+  const tot=mom*.4+pat*.3+mac.v*.3,side=tot>=.2?1:tot<=-.2?-1:0,conf=Math.round(Math.min(95,35+Math.abs(tot)*120));
+  const p=q.price,s=side||1;
+  return{id,a,q,c,pl,mom,pat,mac,tot,side,conf,k:side>0?'b':side<0?'s':'w',sg:sig(id),lv:{e:p,sl:p*(1-s*st.sl/100),t1:p*(1+s*st.t1/100),t2:p*(1+s*st.t2/100)}}}
+function levelsAt(e,side){const s=side||1;return{e,sl:e*(1-s*st.sl/100),t1:e*(1+s*st.t1/100),t2:e*(1+s*st.t2/100)}}
+function srOf(c,p,sg){if(c.length<12)return null;const k=Math.max(2,Math.round(c.length/30)),pv=pivots(c,k),lows=pv.lo.map(i=>c[i]).filter(v=>v<p),highs=pv.hi.map(i=>c[i]).filter(v=>v>p);
+  return{sup:lows.length?Math.max(...lows):Math.min(...c),res:highs.length?Math.min(...highs):Math.max(...c)}}
+function entryOf(x){const r=srOf(x.c,x.q.price,x.sg);if(!r)return null;const p=x.q.price;let e=null;
+  if(x.side>0)e=Math.min(p,Math.max(r.sup*1.0005,p*(1-.8*x.sg/100)));
+  if(x.side<0)e=Math.max(p,Math.min(r.res*.9995,p*(1+.8*x.sg/100)));
+  return{sup:r.sup,res:r.res,e,mkt:e!=null&&Math.abs(e/p-1)<.0004}}
+function backtest(id){const h=H(id),q=Q(id);if(!h||!q)return null;const pts=h.filter(p=>p[0]>=(q.t0||0));if(pts.length<3)return{tr:[]};
+  const tr=[];let t=null,last=null;
+  pts.forEach((p,i)=>{const c=p[1],d=c>=q.open?1:-1;
+    if(t&&!t.done){const mv=(c/t.e-1)*100*t.d;if(mv>=st.t1){t.done=1;t.st='TP1';t.pnl=st.t1}else if(mv<=-st.sl){t.done=1;t.st='SL';t.pnl=-st.sl}else t.pnl=mv}
+    if(i>0&&d!==last){if(t&&!t.done){t.done=1;t.st='смена сигнала'}t={t:p[0],d,e:c,done:0,st:'открыта',pnl:0};tr.push(t)}
+    last=d});
+  return{tr}}
+
+/* ---------- валюта цен: $ или ₽ (курс USD/RUB с server.js) ---------- */
+const NC={dxy:'',usdjpy:'¥',usdchf:'CHF',spx:'пт',ndx:'пт',dax:'пт'};   // не деньги в долларах: пересчёту не подлежат
+const isCv=id=>!(id in NC);
+const rate=()=>{const q=Q('usdrub');return q&&q.price>0?q.price:null};
+const cv=(id,v)=>curr=='RUB'&&isCv(id)&&rate()?v*rate():v;
+function P(id,v,d){if(v==null||isNaN(v))return'—';if(!isCv(id))return fmt(v,d==null?AM[id].d:d)+(NC[id]?' '+NC[id]:'');
+  if(curr=='RUB'){const r=rate();if(!r)return'—';const n=v*r;return fmt(n,Math.abs(n)>=1000?0:2)+' ₽'}return fmt(v,d==null?AM[id].d:d)+' $'}
+function M(usd){if(curr=='RUB'){const r=rate();return r?fmt(usd*r,0)+' ₽':'—'}return fmt(usd,2)+' $'}
+const unit=id=>isCv(id)?(curr=='RUB'?', ₽':', $'):'';
+const curBtn=()=>`<div class='seg' role='group' aria-label='Валюта цен'><button data-cs='USD' class='${curr=='USD'?'on':''}'>$ USD</button><button data-cs='RUB' class='${curr=='RUB'?'on':''}'>₽ RUB</button></div>`;
+
+/* ---------- HTML-помощники ---------- */
+function badge(){const m={ok:'онлайн · обновлено '+new Date(net.t).toLocaleTimeString('ru-RU')+(curr=='RUB'?(rate()?' · 1 $ = '+fmt(rate(),2)+' ₽':' · курс ₽ недоступен'):''),load:'загрузка данных…',bad:'нет связи с server.js'};return `<span class='demo ${net.s}'>${m[net.s]}</span>`}
+const kv=(l,v,c,s)=>`<div class='kv'><div>${l}${s?`<small>${s}</small>`:''}</div><b class='${c||''}'>${v}</b></div>`;
+const cd=(t,b)=>`<div class='card'><h2>${t}</h2>${b}</div>`;
+const dirOf=id=>{const q=Q(id);return q?(q.price>=q.open?['вверх','up']:['вниз','dn']):['—','']};
+const biasW=b=>b>0?'бычий':b<0?'медвежий':'нейтральный';
+function svgChart(v,gid,lv){const w=360,h=150;if(!v||v.length<2)return `<svg viewBox='0 0 ${w} ${h}'><text x='180' y='80' text-anchor='middle' fill='#7f9a8a' font-size='13'>нет данных</text></svg>`;
+  const all=lv?v.concat(lv.map(l=>l.v)):v,mn=Math.min(...all),mx=Math.max(...all),rg=(mx-mn)||1,X=i=>i/(v.length-1)*w,Y=y=>h-8-(y-mn)/rg*(h-16);
+  const c=v[v.length-1]>=v[0]?'#2bd67b':'#e5604d',d=v.map((y,i)=>(i?'L':'M')+X(i).toFixed(1)+' '+Y(y).toFixed(1)).join('');
+  const ex=(lv||[]).map(l=>`<line x1='0' x2='${w}' y1='${Y(l.v).toFixed(1)}' y2='${Y(l.v).toFixed(1)}' stroke='${l.c}' stroke-dasharray='${l.dash?'4 4':''}' opacity='.8'/>`).join('');
+  return `<svg viewBox='0 0 ${w} ${h}' role='img' aria-label='График'><defs><linearGradient id='g${gid}' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='${c}' stop-opacity='.35'/><stop offset='1' stop-color='${c}' stop-opacity='0'/></linearGradient></defs><path d='${d} L${w} ${h} L0 ${h}Z' fill='url(#g${gid})'/><path d='${d}' fill='none' stroke='${c}' stroke-width='2.2' stroke-linejoin='round'/>${ex}</svg>`}
+function mini(v,up){if(!v||v.length<2)return `<svg viewBox='0 0 100 28' preserveAspectRatio='none'><path d='M0 14H100' stroke='#1b3126' fill='none'/></svg>`;
+  const mn=Math.min(...v),mx=Math.max(...v),rg=(mx-mn)||1,d=v.map((y,i)=>(i?'L':'M')+(i/(v.length-1)*100).toFixed(1)+' '+(26-(y-mn)/rg*24).toFixed(1)).join('');
+  return `<svg viewBox='0 0 100 28' preserveAspectRatio='none' aria-hidden='true'><path d='${d}' fill='none' stroke='${up?'#2bd67b':'#e5604d'}' stroke-width='1.8' vector-effect='non-scaling-stroke'/></svg>`}
+function qk(id){const q=Q(id);if(!q)return'w';const p=po(id);return Math.abs(p)<.05?'w':p>0?'b':'s'}
+function row(id){const a=AM[id],q=Q(id),f=favs.includes(id),k=qk(id);
+  return `<div class='ar' tabindex='0' role='button' data-id='${id}'><button class='star${f?' on':''}' data-fav='${id}' aria-label='${f?'Убрать из избранного':'Добавить в избранное'}'>★</button><div class='an'><b>${a.n}</b><span>${a.t}<em class='${k}'>${q?SL[k]:'нет данных'}</em></span></div><div class='sp'>${mini(q&&q.spark,q?q.pct>=0:1)}</div><div class='ap'><b>${q?P(id,q.price):'—'}</b><span class='chg ${q&&q.pct<0?'dn':'up'}'>${q?pc(q.pct):''}</span></div></div>`}
+function cc(id,h,lv){const a=AM[id],q=Q(id),v=H(id)?closes(id):(q?q.spark:null);
+  return `<a href='#${h}' class='hl'><div class='card'><div class='row'><h2>${a.n}</h2><span class='chg ${q&&q.pct<0?'dn':'up'}'>${q?pc(q.pct):'—'}</span></div>${svgChart(v,id,lv)}</div></a>`}
+function chipsBar(attr){return `<div class='chips'>${uniq(favs.concat([cur])).map(id=>`<button class='chip${id==cur?' on':''}' ${attr}='${id}'>${AM[id].t}</button>`).join('')}<a class='chip more' href='#assets'>Все активы</a></div>`}
+function chartCard(title,ok){return `<div class='card'><div class='row'><h2>${title}</h2><span class='note' style='margin:0'>таймфрейм ${st.iv}, 24 часа</span></div>${ok?`<div class='cbox'><canvas id='cv' aria-label='${title}'></canvas></div>`:`<p class='sub' style='margin:20px 0'>График появится, когда server.js отдаст историю.</p>`}</div>`}
+function mount(labels,sets){if(ch){ch.destroy();ch=null}const cv=$('cv');if(!cv)return;if(typeof Chart=='undefined'){cv.parentNode.innerHTML='<p class="sub">Chart.js не загрузился — проверьте интернет.</p>';return}
+  const ctx=cv.getContext('2d'),g=ctx.createLinearGradient(0,0,0,300);g.addColorStop(0,'rgba(43,214,123,.3)');g.addColorStop(1,'rgba(43,214,123,0)');
+  ch=new Chart(ctx,{type:'line',data:{labels,datasets:sets.map(s=>({label:s.l,data:s.d,borderColor:s.c||'#2bd67b',backgroundColor:s.f?g:'transparent',fill:!!s.f,borderWidth:s.w||2,borderDash:s.dash||[],pointRadius:s.pr||0,pointBackgroundColor:s.c||'#2bd67b',showLine:s.show!==false,tension:.2}))},
+    options:{responsive:true,maintainAspectRatio:false,animation:false,interaction:{intersect:false,mode:'index'},plugins:{legend:{display:sets.length>1,labels:{color:'#7f9a8a',boxWidth:12}}},scales:{x:{ticks:{color:'#7f9a8a',maxTicksLimit:8},grid:{color:'#1b3126'}},y:{ticks:{color:'#7f9a8a'},grid:{color:'#1b3126'}}}}})}
+const flat=(n,v)=>Array(n).fill(v);
+function priceChart(id,extra){const h=H(id);if(h)post=()=>mount(h.map(p=>tm(p[0])),[{l:AM[id].t,d:h.map(p=>cv(id,p[1])),f:1}].concat((extra||[]).map(e=>({l:e.l,d:flat(h.length,cv(id,e.v)),c:e.c,dash:e.dash?[6,5]:[],w:1.6}))));return chartCard('График за 24 часа — '+AM[id].t+unit(id),!!h)}
+function lvLines(x){return x&&x.side?[{l:'Вход',v:x.lv.e,c:'#7dffb3'},{l:'Стоп',v:x.lv.sl,c:'#e5604d',dash:1},{l:'Тейк 1',v:x.lv.t1,c:'#2bd67b',dash:1},{l:'Тейк 2',v:x.lv.t2,c:'#14803f',dash:1}]:[]}
+const L=(x,k)=>x&&x.side?P(x.id,x.lv[k]):'—';
+const rr=()=>`1:${(st.t1/st.sl).toFixed(1).replace('.',',')} – 1:${(st.t2/st.sl).toFixed(1).replace('.',',')}`;
+
+/* ---------- экраны ---------- */
+function home(){const x=sigOf(cur),a=AM[cur],k=x?x.k:'w',D=dirOf('dxy'),B=dirOf('brent');
+  const why=x?(x.side?`Баланс факторов ${sgn(x.tot)}: импульс ${sgn(x.mom)}, паттерн ${sgn(x.pat)}, DXY и Brent ${sgn(x.mac.v)}.`:'Факторы расходятся — лучше подождать.'):'Ждём данные от server.js.';
+  const title={b:'Сигнал на покупку',s:'Сигнал на продажу',w:'Нет чёткого сигнала'}[k];
+  return badge()+`<h1>Где лучше входить сейчас</h1><p class='sub'>Выберите актив. Сайт сверит его с DXY и Brent и покажет вход, тейк и стоп.</p>`+chipsBar('data-id')+
+  `<div class='hero'><a href='#signal' class='hl'><div class='card sig ${k}'><div class='row'><span class='pill'>${x?title:'Загрузка'}</span><span style='color:var(--mute)'>${a.t}, ${st.iv}</span></div><div class='big' style='margin-top:16px'>${x?SG[k]:'—'}</div><p style='color:var(--mute);margin-top:6px'>${why}</p>
+  <div class='lv'><div><span>Вход</span><b>${L(x,'e')}</b></div><div class='sl'><span>Стоп-лосс</span><b>${L(x,'sl')}</b></div><div class='tp'><span>Тейк 1</span><b>${L(x,'t1')}</b></div><div class='tp'><span>Тейк 2</span><b>${L(x,'t2')}</b></div></div></div></a>
+  <div class='card'><h2>Уверенность сигнала</h2><div class='row'><b style='font-size:34px;color:var(--g2)'>${x?x.conf+'%':'—'}</b><span style='color:var(--mute)'>риск/прибыль ${x&&x.side?rr():'—'}</span></div><div class='bar'><i style='width:${x?x.conf:0}%'></i></div>
+  <div style='margin-top:14px'>${kv('Паттерн',x&&x.pl.length?x.pl[0].n:'—')}${kv('DXY',D[0],D[1])}${kv('Brent',B[0],B[1])}</div></div></div>`+
+  `<div class='charts'>${cc(cur,'entry',x&&x.side?lvLines(x).map(l=>({v:l.v,c:l.c,dash:l.dash})):null)}${cc('dxy','dxy')}${cc('brent','brent')}</div>`+
+  `<div class='row' style='margin-top:28px'><h2>Мои активы</h2><a href='#assets' style='color:var(--g1);font-weight:600;text-decoration:none'>Все активы</a></div><div class='list'>${favs.map(row).join('')||'<p class="sub">Добавьте активы в избранное звёздочкой.</p>'}</div>`+
+  `<h2 style='margin-top:28px'>Разделы</h2><div class='tiles'>${S.slice(2).map(s=>`<button class='tile' onclick="location.hash='${s[0]}'"><b>${s[1]}</b><span>${s[3]}</span></button>`).join('')}</div><p class='note'>Данные: Yahoo Finance через server.js, обновление каждые 15 секунд. Сигналы считаются по формуле сайта и не являются финансовой рекомендацией.</p>`}
+
+function assets(){return badge()+`<h1>Активы</h1><p class='sub'>Нажмите на актив, чтобы увидеть по нему сигнал. Звёздочка добавляет актив в избранное на главной. Метка рядом с тикером показывает положение цены относительно открытия дня.</p><input id='qs' class='search' type='search' placeholder='Найти: золото, EUR/USD, нефть' aria-label='Поиск актива'><div class='chips'>${CATS.map(c=>`<button class='chip${c[0]==cat?' on':''}' data-cat='${c[0]}'>${c[1]}</button>`).join('')}</div><div id='alist' class='list'></div>`}
+function fillList(){const s=qs.toLowerCase(),l=A.filter(a=>(cat=='all'||(cat=='fav'?favs.includes(a[0]):a[3]==cat))&&(a[1]+' '+a[2]).toLowerCase().includes(s));$('alist').innerHTML=l.length?l.map(a=>row(a[0])).join(''):'<p class="sub">Ничего не найдено. Сбросьте фильтр или поиск.</p>'}
+function initAssets(){const i=$('qs');i.value=qs;i.addEventListener('input',()=>{qs=i.value;fillList()});fillList()}
+function menu(){return `<h1>Все разделы</h1><p class='sub'>Выберите, что открыть.</p><div class='tiles'>${S.slice(1).map(s=>`<button class='tile' onclick="location.hash='${s[0]}'"><b>${s[1]}</b><span>${s[3]}</span></button>`).join('')}</div>`}
+
+function pSignal(){const x=sigOf(cur);if(!x)return'<div class="card"><p class="sub">Нет данных по активу.</p></div>';
+  const ch1=priceChart(cur,lvLines(x));
+  return ch1+`<div class='grid3'>${cd('Решение',`<div class='big ${x.k}'>${SG[x.k]}</div><div class='row' style='margin-top:10px'><span class='mute'>Уверенность</span><b>${x.conf}%</b></div><div class='bar'><i style='width:${x.conf}%'></i></div>`)}
+  ${cd('Из чего сложился сигнал',kv('Импульс (цена к открытию дня)',sgn(x.mom),x.mom>=0?'up':'dn','вес 40%')+kv('Паттерн',sgn(x.pat),x.pat>=0?'up':'dn','вес 30%')+kv('DXY и Brent',sgn(x.mac.v),x.mac.v>=0?'up':'dn','вес 30%, с учётом корреляции')+kv('Итог',sgn(x.tot),x.tot>=0?'up':'dn','порог ±0,20'))}
+  ${cd('Уровни',kv('Вход',L(x,'e'))+kv('Стоп-лосс (−'+st.sl+'%)',L(x,'sl'),'dn')+kv('Тейк 1 (+'+st.t1+'%)',L(x,'t1'),'up')+kv('Тейк 2 (+'+st.t2+'%)',L(x,'t2'),'up')+kv('Риск/прибыль',x.side?rr():'—'))}</div>`}
+
+function pEntry(){const x=sigOf(cur);if(!x)return'<div class="card"><p class="sub">Нет данных по активу.</p></div>';const e=entryOf(x),d=v=>P(x.id,v);
+  const ex=e?[{l:'Поддержка',v:e.sup,c:'#2bd67b',dash:1},{l:'Сопротивление',v:e.res,c:'#e5604d',dash:1}].concat(e.e!=null?[{l:'Точка входа',v:e.e,c:'#7dffb3'}]:[]):[];
+  const lv=e&&e.e!=null?levelsAt(e.e,x.side):null,dd=e&&e.e!=null?(e.e/x.q.price-1)*100:null,c1=x.mac.c1,c2=x.mac.c2,D=dirOf('dxy'),B=dirOf('brent');
+  return priceChart(cur,ex)+`<div class='grid3'>${cd('Лучшая точка входа',e&&e.e!=null?kv('Сторона',x.side>0?'покупка':'продажа',x.side>0?'up':'dn')+kv('Тип',e.mkt?'по рынку':'лимитный ордер')+kv('Цена входа',d(e.e))+kv('От текущей цены',pc(dd))+kv('Стоп / Тейк 1',d(lv.sl)+' / '+d(lv.t1)):'<p class="sub" style="margin:0">Сигнала нет, точка входа не рассчитывается. Ждём совпадения факторов.</p>')}
+  ${cd('Уровни рядом',kv('Поддержка',e?d(e.sup):'—','up',e?pc((e.sup/x.q.price-1)*100)+' от цены':'')+kv('Сопротивление',e?d(e.res):'—','dn',e?pc((e.res/x.q.price-1)*100)+' от цены':'')+kv('Текущая цена',d(x.q.price)))}
+  ${cd('Подтверждение',kv('DXY',D[0],D[1],c1==null?'':'корреляция '+fmt(c1,2))+kv('Brent',B[0],B[1],c2==null?'':'корреляция '+fmt(c2,2))+kv('Паттерн',x.pl.length?x.pl[0].n:'—'))}</div>`}
+
+function pRisk(){const x=sigOf(cur);if(!x)return'<div class="card"><p class="sub">Нет данных по активу.</p></div>';const ok=x.side!=0,okp=ok&&isCv(x.id),rs=st.dep*st.risk/100,dist=Math.abs(x.lv.e-x.lv.sl),u=dist?rs/dist:0;
+  return priceChart(cur,lvLines(x))+`<div class='grid3'>${cd('Стоп-лосс',kv('Цена',L(x,'sl'),'dn')+kv('Расстояние','−'+st.sl+'%')+kv('Потеря при срабатывании',ok?'−'+M(rs):'—','dn',st.risk+'% от депозита '+M(st.dep)))}
+  ${cd('Тейк-профиты',kv('Тейк 1',L(x,'t1'),'up',ok?'прибыль '+M(rs*st.t1/st.sl):'')+kv('Тейк 2',L(x,'t2'),'up',ok?'прибыль '+M(rs*st.t2/st.sl):'')+kv('Риск/прибыль',ok?rr():'—'))}
+  ${cd('Размер позиции',kv('Количество',okp?fmt(u,u>=100?0:3):'—','',x.a.t)+kv('Объём позиции',okp?M(u*x.lv.e):'—')+kv('Риск на сделку',st.risk+'%','','меняется в настройках'))}</div>`}
+
+function pPatterns(){const x=sigOf(cur);if(!x)return'<div class="card"><p class="sub">Нет данных по активу.</p></div>';const c=x.c,r=c.length>5?reg(c):null,tot=r?r.slope*c.length/r.my*100:null;
+  return priceChart(cur)+`<div class='grid3'>${cd('Найденные фигуры',x.pl.length?x.pl.map(p=>kv(p.n,biasW(p.b),p.b>0?'up':p.b<0?'dn':'wt',p.d)).join(''):'<p class="sub" style="margin:0">Мало данных для поиска (нужно не менее 24 свечей).</p>')}
+  ${cd('Тренд окна',kv('Ход за 24 часа',pc(tot),tot>=0?'up':'dn')+kv('Чёткость тренда (R²)',r?fmt(r.r2,2):'—')+kv('Свечей в анализе',String(c.length)))}
+  ${cd('Волатильность',kv('σ окна',c.length?fmt(x.sg,2)+'%':'—')+kv('Максимум',c.length?P(x.id,Math.max(...c)):'—')+kv('Минимум',c.length?P(x.id,Math.min(...c)):'—'))}</div>
+  <p class='note'>Фигуры ищутся простыми правилами по ценам закрытия за 24 часа, поэтому это ориентир, а не подтверждённая модель.</p>`}
+
+function pIdx(id){const q=Q(id),a=AM[id],D=dirOf(id),c=closes(id),r=c.length>5?reg(c):null,tot=r?r.slope*c.length/r.my*100:null,s=q&&c.length?srOf(c,q.price,sig(id)):null;
+  return priceChart(id)+`<div class='grid3'>${cd('Цена',kv('Сейчас',q?P(id,q.price):'—')+kv('За день',q?pc(q.pct):'—',q&&q.pct<0?'dn':'up')+kv('Открытие дня',q?P(id,q.open):'—'))}
+  ${cd('Диапазон дня',kv('Максимум',q?P(id,q.hi):'—')+kv('Минимум',q?P(id,q.lo):'—')+kv('Размах',q&&q.lo?fmt((q.hi/q.lo-1)*100,2)+'%':'—'))}
+  ${cd('Направление',kv('К открытию дня',D[0],D[1])+kv('Поддержка / сопротивление',s?P(id,s.sup)+' / '+P(id,s.res):'—')+kv('Ход за 24 часа',pc(tot),tot>=0?'up':'dn'))}</div>`}
+
+function pCorr(){const ids=uniq([cur,'dxy','brent']),al=align(ids);
+  if(al)post=()=>mount(al.ts.map(tm),ids.map((id,i)=>({l:AM[id].t,d:al.v[i].map(v=>(v/al.v[i][0]-1)*100),c:['#7dffb3','#d9b64a','#4fa3d1'][i],f:i==0})));
+  const cr=(a,b)=>{const v=a==b?null:corr(a,b);return `<div class='kv'><div>${AM[a].t} и ${AM[b].t}</div><div style='min-width:90px;text-align:right'><b class='${v==null?'':v>=0?'up':'dn'}'>${v==null?'—':fmt(v,2)}</b><div class='bar'><i style='width:${v==null?0:Math.abs(v)*100}%;${v<0?'background:linear-gradient(90deg,#7a2a20,var(--red))':''}'></i></div></div></div>`};
+  const body=al?`<div class='card'><div class='row'><h2>Изменение с начала окна, %</h2><span class='note' style='margin:0'>24 часа</span></div><div class='cbox'><canvas id='cv' aria-label='Корреляция'></canvas></div></div>`:`<div class='card'><p class='sub' style='margin:20px 0'>Нужна история по трём активам от server.js.</p></div>`;
+  return body+`<div class='grid3'>${cd(AM[cur].t+' и DXY',cr(cur,'dxy'))}${cd(AM[cur].t+' и Brent',cr(cur,'brent'))}${cd('DXY и Brent',cr('dxy','brent'))}</div><p class='note'>Корреляция считается по доходностям свечей за 24 часа: +1 — активы ходят вместе, −1 — в разные стороны.</p>`}
+
+function pHist(){const bt=backtest(cur),h=H(cur);if(!bt||!h)return'<div class="card"><p class="sub">Нет данных по активу.</p></div>';
+  const tr=bt.tr,cl=tr.filter(t=>t.done),w=cl.filter(t=>t.pnl>0).length,sum=tr.reduce((s,t)=>s+t.pnl,0);
+  if(h)post=()=>mount(h.map(p=>tm(p[0])),[{l:AM[cur].t,d:h.map(p=>cv(cur,p[1])),f:1},{l:'Покупка',d:h.map(p=>{const t=tr.find(t=>t.t==p[0]&&t.d>0);return t?cv(cur,t.e):null}),c:'#2bd67b',pr:6,show:false},{l:'Продажа',d:h.map(p=>{const t=tr.find(t=>t.t==p[0]&&t.d<0);return t?cv(cur,t.e):null}),c:'#e5604d',pr:6,show:false}]);
+  const list=tr.slice(-6).reverse().map(t=>`<div class='tr'><span>${tm(t.t)} <b class='${t.d>0?'up':'dn'}'>${t.d>0?'покупка':'продажа'}</b> ${P(cur,t.e)}</span><span class='mute'>${t.st}</span><b class='${t.pnl>=0?'up':'dn'}'>${pc(t.pnl)}</b></div>`).join('');
+  return chartCard('Сигналы за сессию — '+AM[cur].t+unit(cur),true)+`<div class='grid3'>${cd('Итоги',kv('Сигналов',String(tr.length))+kv('Закрыто',String(cl.length))+kv('Прибыльных',cl.length?w+' из '+cl.length:'—')+kv('Результат',tr.length?pc(sum):'—',sum>=0?'up':'dn'))}
+  ${cd('Последние сигналы',list||'<p class="sub" style="margin:0">С открытия дня цена не пересекала уровень открытия, новых сигналов не было.</p>')}
+  ${cd('Правило',`<p class='sub' style='margin:0'>Покупка, когда цена выше открытия дня, продажа, когда ниже. Сделка закрывается по тейку 1 (+${st.t1}%), по стопу (−${st.sl}%) или при смене сигнала.</p>`)}</div>`}
+
+function pSettings(){const o=['5m','15m','1h'].map(v=>`<option value='${v}'${v==st.iv?' selected':''}>${v}</option>`).join('');
+  return `<div class='grid3'>${cd('Таймфрейм',`<label for='s_iv'>Свечи для графиков, паттернов и корреляции</label><select id='s_iv' class='fld'>${o}</select><p class='note' style='margin-top:12px'>Источник: ${net.s=='bad'?'нет связи с server.js':'Yahoo Finance через server.js'}. Котировки обновляются каждые 15 секунд.</p>`)}
+  ${cd('Стоп и тейки, % от цены',`<label for='s_sl'>Стоп-лосс</label><input id='s_sl' class='fld' type='number' step='0.05' min='0.05' value='${st.sl}'><label for='s_t1'>Тейк 1</label><input id='s_t1' class='fld' type='number' step='0.05' min='0.05' value='${st.t1}'><label for='s_t2'>Тейк 2</label><input id='s_t2' class='fld' type='number' step='0.05' min='0.05' value='${st.t2}'>`)}
+  ${cd('Риск на сделку',`<label for='s_dep'>Депозит в долларах, $</label><input id='s_dep' class='fld' type='number' step='100' min='1' value='${st.dep}'><label for='s_risk'>Риск на сделку, % депозита</label><input id='s_risk' class='fld' type='number' step='0.1' min='0.1' max='100' value='${st.risk}'>`)}</div>`}
+
+function page(s){const k=s[0],f={signal:pSignal,entry:pEntry,risk:pRisk,patterns:pPatterns,dxy:()=>pIdx('dxy'),brent:()=>pIdx('brent'),corr:pCorr,history:pHist,settings:pSettings}[k];
+  const withAsset=['signal','entry','risk','patterns','corr','history'].includes(k);
+  return badge()+`<h1>${s[1]}</h1><p class='sub'>${s[3]}</p>${withAsset?chipsBar('data-cur'):''}${f()}<p class='note'><a href='#home' style='color:var(--g1)'>Назад на главную</a></p>`}
+
+/* ---------- навигация и отрисовка ---------- */
+function nav(c){$('nav').innerHTML='<div class="brand"><i></i>Верде</div><div style="padding:0 10px 14px">'+curBtn()+'</div>'+S.map((s,i)=>(i==1?'<hr>':'')+`<a href='#${s[0]}' class='${s[0]==c?'on':''}'>${s[1]}<small>${s[2]}</small></a>`).join('')}
+function tabs(c){const on=T.some(t=>t[0]==c)?c:'menu';$('tabs').innerHTML=T.map(t=>`<a href='#${t[0]}' class='${t[0]==on?'on':''}'><svg viewBox='0 0 24 24' aria-hidden='true'><path d='${t[2]}'/></svg>${t[1]}</a>`).join('')}
+function render(keep){const ae=document.activeElement;if(keep&&ae&&/INPUT|SELECT/.test(ae.tagName))return;
+  const r=route(),s=S.find(x=>x[0]==r)||['menu','Разделы'];post=null;nav(s[0]);tabs(s[0]);
+  $('ttl').textContent=s[0]=='home'?'Верде':s[1];$('live').className='live '+net.s;$('live').textContent={ok:'онлайн',load:'загрузка',bad:'нет связи'}[net.s];$('curb').innerHTML=curBtn();
+  const y=window.scrollY;$('main').innerHTML=s[0]=='home'?home():s[0]=='menu'?menu():s[0]=='assets'?assets():page(s);
+  if(post)post();if(s[0]=='assets')initAssets();window.scrollTo(0,keep?y:0)}
+function refresh(keep){const n=need(route());if(!n.q.length&&!n.h.length){render(keep);return Promise.resolve()}
+  return Promise.all([getQ(n.q)].concat(n.h.map(getH))).then(()=>{net={s:n.q.length&&!n.q.some(Q)?'bad':'ok',t:Date.now()}},()=>{net.s='bad'}).then(()=>render(keep))}
+function go(){render();refresh()}
+function pick(id){cur=id;save();if(route()=='home')go();else location.hash='home'}
+function tog(id){const i=favs.indexOf(id);if(i>-1)favs.splice(i,1);else favs.push(id);save();const y=window.scrollY;render();window.scrollTo(0,y)}
+
+document.addEventListener('click',e=>{const t=e.target,f=t.closest('[data-fav]');if(f){tog(f.dataset.fav);return}
+  const cs=t.closest('[data-cs]');if(cs){curr=cs.dataset.cs;save();const y=window.scrollY;render();window.scrollTo(0,y);return}
+  const c=t.closest('[data-cat]');if(c){cat=c.dataset.cat;render();return}
+  const u=t.closest('[data-cur]');if(u){cur=u.dataset.cur;save();go();return}
+  const r=t.closest('[data-id]');if(r)pick(r.dataset.id)});
+document.addEventListener('keydown',e=>{if(e.key=='Enter'&&e.target.classList&&e.target.classList.contains('ar'))pick(e.target.dataset.id)});
+document.addEventListener('change',e=>{const t=e.target;if(!t.id||t.id.indexOf('s_')!=0)return;const k=t.id.slice(2),v=k=='iv'?t.value:parseFloat(t.value);
+  if(k=='iv'){st.iv=v}else if(v>0){st[k]=v}save();go()});
+window.addEventListener('hashchange',go);
+setInterval(()=>{if(!document.hidden)refresh(true)},15000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh(true)});
+go();
+</script>
+</body>
+</html>
