@@ -1,6 +1,7 @@
 // Запуск: node server.js  (нужен Node 18+, зависимости не нужны)
 // Открыть: http://localhost:3000
-// Для ИИ-сигналов: OPENROUTER_API_KEY=ваш_ключ node server.js  (или GROQ_API_KEY; без ключа работает встроенный анализатор)
+// Для ИИ-сигналов: OPENROUTER_API_KEY=ваш_ключ node server.js  (запасной: GROQ_API_KEY; без ключа работает встроенный анализатор)
+// ИИ анализирует все 5 активов одним запросом, результат кэшируется на 15 минут (кэш лежит в ai-cache.json)
 const http = require('http'), fs = require('fs'), path = require('path');
 
 // Тикеры Yahoo Finance
@@ -177,73 +178,98 @@ async function localSignal(id, snap) {
   return { status, confidence: conf, reason: `${nTxt} ${TN[id]} ${sg2(q.pct)} за день; ${mTxt}; корреляционный фон ${mac >= 0 ? 'за рост' : 'за падение'} (${mac.toFixed(2).replace('.', ',')}). ${tail}` };
 }
 
-// ===== ИИ-анализ: промпт, разбор ответа, OpenRouter и Groq =====
-// openrouter/free сам выбирает свободную рабочую бесплатную модель; остальные: запасные
-const MODELS = ['openrouter/free', 'deepseek/deepseek-r1-0528:free', 'qwen/qwen3-32b:free', 'meta-llama/llama-3.2-3b-instruct:free'];
+// ===== ИИ-анализ: один пакетный запрос на все 5 активов + умный кэш =====
+const AI_TTL = 15 * 60 * 1000;          // результат ИИ живёт 15 минут (поставьте 30 * 60 * 1000, чтобы уложиться в 50 запросов в сутки)
+const AI_MIN_GAP = 3 * 60 * 1000;       // досрочное обновление по новой новости не чаще раза в 3 минуты
+const AI_MAX_AGE = 60 * 60 * 1000;      // если обновить не удаётся, старый результат ИИ годен не дольше часа
+const AI_BACKOFF = 5 * 60 * 1000;       // после неудачи ИИ не дёргаем 5 минут
+const AI_DAILY_MAX = 45;                // запас под лимит OpenRouter (50 запросов в сутки), считаются и запросы к запасным моделям
+// openrouter/free сам выбирает свободную рабочую модель; остальные: запасные
+const MODELS = ['openrouter/free', 'meta-llama/llama-3.3-70b-instruct:free', 'google/gemini-2.0-flash-exp:free'];
+const ALIAS = { dxy: ['dxy'], eurusd: ['eurusd', 'eur/usd'], xau: ['xau', 'xauusd', 'xau/usd', 'gold'], brent: ['brent'], btc: ['btc', 'btcusd', 'btc/usd'] };
+const AI_FILE = path.join(__dirname, 'ai-cache.json');   // кэш переживает перезапуск сервера
 
-function buildMessages(id, snap) {
+let ai = { t: 0, v: null, source: null, model: null, err: null, seen: new Set(), tryT: 0, backoff: 0 };
+let usage = { day: '', n: 0 }, aiJob = null;
+try { const d = JSON.parse(fs.readFileSync(AI_FILE, 'utf8')); ai = Object.assign(ai, d.ai, { seen: new Set(d.ai.seen || []) }); usage = d.usage || usage; } catch (e) { /* кэша нет */ }
+function saveAi() { try { fs.writeFileSync(AI_FILE, JSON.stringify({ ai: Object.assign({}, ai, { seen: [...ai.seen] }), usage })); } catch (e) { /* не критично */ } }
+function budgetLeft() { const day = new Date().toISOString().slice(0, 10); if (usage.day !== day) usage = { day, n: 0 }; return AI_DAILY_MAX - usage.n; }
+
+function buildMessages(snap) {
   const quotes = {};
-  for (const k of Object.keys(snap)) quotes[TN[k]] = { price: snap[k].price, change_day_pct: +snap[k].pct.toFixed(3), open: snap[k].open };
+  for (const k of Object.keys(snap)) quotes[k] = { name: TN[k], price: snap[k].price, change_day_pct: +snap[k].pct.toFixed(3), open: snap[k].open };
   const headlines = news.items.map(i => ({ title: i.title, minutes_ago: Math.round((Date.now() - i.ts) / 60000), tags: i.tags }));
   return [
-    { role: 'system', content: 'Ты аналитик рынков. По заголовкам новостей и котировкам оцени краткосрочное (на несколько часов) направление указанного актива. Опирайся только на переданные данные, ничего не выдумывай. Ответь ТОЛЬКО JSON без пояснений и без markdown: {"status":"ПОКУПАТЬ"|"ПРОДАВАТЬ"|"ЖДАТЬ","confidence":число от 0 до 100,"reason":"1-3 предложения на русском языке"}. Если новости противоречивы или несущественны, ставь ЖДАТЬ.' },
-    { role: 'user', content: JSON.stringify({ asset: TN[id], quotes, headlines }) }
+    { role: 'system', content: 'Ты аналитик рынков. Проанализируй сразу пять активов: dxy (индекс доллара), eurusd (EUR/USD), xau (золото XAU/USD), brent (нефть Brent), btc (BTC/USD) по заголовкам новостей и котировкам. Для КАЖДОГО дай краткосрочный (на несколько часов) сигнал о направлении цены самого актива. Опирайся только на переданные данные, ничего не выдумывай. Ответь ТОЛЬКО JSON без пояснений и без markdown, с ключами dxy, eurusd, xau, brent, btc. Значение каждого: {"status":"ПОКУПАТЬ"|"ПРОДАВАТЬ"|"ЖДАТЬ","confidence":число от 0 до 100,"reason":"1-2 предложения на русском языке"}. Если новости противоречивы или несущественны, ставь ЖДАТЬ.' },
+    { role: 'user', content: JSON.stringify({ quotes, headlines }) }
   ];
-}
-
-// Достаём JSON из текста ответа (модель могла добавить пояснения или ```json)
-function extractJson(text) {
-  const t = String(text || ''), cands = [], g = t.match(/\{[\s\S]*\}/);
-  if (g) cands.push(g[0]);
-  (t.match(/\{[^{}]*\}/g) || []).forEach(c => cands.push(c));
-  for (const c of cands) { try { const j = JSON.parse(c); if (j && j.status) return j; } catch (e) { /* пробуем следующий */ } }
-  throw new Error('JSON не найден в ответе: ' + t.slice(0, 120));
 }
 
 function parseSignal(j) {
   const map = { 'ПОКУПАТЬ': 'ПОКУПАТЬ', 'BUY': 'ПОКУПАТЬ', 'ПРОДАВАТЬ': 'ПРОДАВАТЬ', 'SELL': 'ПРОДАВАТЬ', 'ЖДАТЬ': 'ЖДАТЬ', 'WAIT': 'ЖДАТЬ', 'HOLD': 'ЖДАТЬ' };
   const status = map[String(j.status).trim().toUpperCase()], conf = Math.round(Number(j.confidence));
-  if (!status || isNaN(conf) || !j.reason) throw new Error('неверный формат ответа');
+  if (!status || isNaN(conf) || !j.reason) throw new Error('неверный формат');
   return { status, confidence: clamp(conf, 0, 100), reason: String(j.reason).slice(0, 500) };
 }
 
-async function askOpenRouter(id, snap) {
-  const messages = buildMessages(id, snap), errs = [], t0 = Date.now();
+function parseBatch(j) {
+  const src = j && typeof j.signals === 'object' && j.signals ? j.signals : j, low = {}, out = {};
+  Object.keys(src || {}).forEach(k => { low[k.toLowerCase()] = src[k]; });
+  for (const id of CORE) for (const a of ALIAS[id]) {
+    if (low[a] && typeof low[a] === 'object') { try { out[id] = parseSignal(low[a]); break; } catch (e) { /* пробуем другой ключ */ } }
+  }
+  if (!Object.keys(out).length) throw new Error('в ответе нет ни одного актива');
+  return out;
+}
+
+// Достаём JSON из текста ответа (модель могла добавить пояснения или ```json)
+function extractBatch(text) {
+  const t = String(text || ''), cands = [], g = t.match(/\{[\s\S]*\}/);
+  if (g) cands.push(g[0]);
+  for (let i = t.indexOf('{'); i !== -1 && cands.length < 20; i = t.indexOf('{', i + 1)) {   // запасной вариант: сбалансированные блоки {...}
+    let d = 0, str = false, esc = false;
+    for (let k = i; k < t.length; k++) {
+      const c = t[k];
+      if (str) { if (esc) esc = false; else if (c === '\\') esc = true; else if (c === '"') str = false; continue; }
+      if (c === '"') str = true; else if (c === '{') d++; else if (c === '}' && --d === 0) { cands.push(t.slice(i, k + 1)); break; }
+    }
+  }
+  for (const c of cands) { try { return parseBatch(JSON.parse(c)); } catch (e) { /* следующий кандидат */ } }
+  throw new Error('JSON не найден в ответе: ' + t.slice(0, 120));
+}
+
+// Один запрос анализирует все 5 активов и возвращает { dxy: {...}, eurusd: {...}, xau: {...}, brent: {...}, btc: {...} }
+async function askOpenRouter(snap) {
+  const messages = buildMessages(snap), errs = [], t0 = Date.now();
   for (const model of MODELS) {
+    if (budgetLeft() <= 0) { errs.push('исчерпан дневной лимит запросов (' + AI_DAILY_MAX + ')'); break; }
     if (Date.now() - t0 > 30000) { errs.push('превышено общее время ожидания'); break; }
     try {
+      usage.n++; saveAi();
       const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: { Authorization: 'Bearer ' + process.env.OPENROUTER_API_KEY, 'Content-Type': 'application/json', 'HTTP-Referer': 'http://localhost:3000', 'X-Title': 'Verde' },
-        body: JSON.stringify({ model, messages, temperature: .2, max_tokens: 1200 }),   // 1200: thinking-моделям хватает места и на рассуждения, и на готовый JSON; без response_format: часть бесплатных моделей отвечает на него ошибкой 400
-        signal: AbortSignal.timeout(15000)
+        body: JSON.stringify({ model, messages, temperature: .2, max_tokens: 1200 }),   // без response_format: часть бесплатных моделей отвечает на него ошибкой 400
+        signal: AbortSignal.timeout(20000)
       });
       const raw = await r.text();
       let j = null; try { j = JSON.parse(raw); } catch (e) { /* не JSON */ }
       if (!r.ok || (j && j.error)) throw new Error('HTTP ' + r.status + ' ' + String((j && j.error && (j.error.message || JSON.stringify(j.error))) || raw).slice(0, 300));
       const m = j && j.choices && j.choices[0] && j.choices[0].message;
-      // сначала content; если он пуст или без JSON, ищем JSON в reasoning (thinking-модели)
-      const texts = [m && m.content, m && m.reasoning, m && m.reasoning_content].map(x => typeof x === 'string' ? x : (x != null ? JSON.stringify(x) : '')).filter(x => x.trim());
-      let out = null, lastErr = null;
-      for (const t of texts.length ? texts : ['']) { try { out = parseSignal(extractJson(t)); break; } catch (e) { lastErr = e; } }
-      if (!out) throw lastErr || new Error('пустой ответ модели');
-      out.model = (j && j.model) || model;
-      return out;
+      return { map: extractBatch(m && (m.content || m.reasoning)), model: (j && j.model) || model };
     } catch (e) { errs.push(model + ': ' + e.message); }
   }
   throw new Error(errs.join(' | ').slice(0, 800));
 }
 
-async function groqSignal(id, snap) {
+async function askGroq(snap) {   // запасной ИИ, если задан GROQ_API_KEY
   const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST', headers: { Authorization: 'Bearer ' + process.env.GROQ_API_KEY, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: 'llama-3.3-70b-versatile', temperature: .2, max_tokens: 400, response_format: { type: 'json_object' }, messages: buildMessages(id, snap) }),
-    signal: AbortSignal.timeout(15000)
+    body: JSON.stringify({ model: 'llama-3.3-70b-versatile', temperature: .2, max_tokens: 1200, response_format: { type: 'json_object' }, messages: buildMessages(snap) }),
+    signal: AbortSignal.timeout(20000)
   });
   if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + (await r.text()).slice(0, 200));
-  const out = parseSignal(extractJson((await r.json()).choices[0].message.content));
-  out.model = 'llama-3.3-70b-versatile';
-  return out;
+  return { map: extractBatch((await r.json()).choices[0].message.content), model: 'llama-3.3-70b-versatile' };
 }
 
 async function snapshot(id) {
@@ -252,23 +278,46 @@ async function snapshot(id) {
   return out;
 }
 
+async function runAi() {
+  const snap = await snapshot('dxy'), errs = [];
+  ai.tryT = Date.now();
+  let res = null;
+  if (process.env.OPENROUTER_API_KEY) { try { res = await askOpenRouter(snap); res.source = 'openrouter'; } catch (e) { errs.push('OpenRouter: ' + e.message); } }
+  if (!res && process.env.GROQ_API_KEY) { try { res = await askGroq(snap); res.source = 'groq'; } catch (e) { errs.push('Groq: ' + e.message); } }
+  if (res) { ai.v = res.map; ai.model = res.model; ai.source = res.source; ai.t = Date.now(); ai.seen = new Set(news.items.map(i => i.title)); }
+  else ai.backoff = Date.now() + AI_BACKOFF;
+  ai.err = errs.length ? errs.join(' | ').slice(0, 900) : null;
+  if (ai.err) console.warn('ИИ:', ai.err);
+  saveAi();
+}
+
+// Обновляем ИИ только если кэш старше 15 минут или в ленте FinancialJuice появился новый заголовок
+async function aiBatch() {
+  const now = Date.now();
+  if (!process.env.OPENROUTER_API_KEY && !process.env.GROQ_API_KEY) { ai.err = 'ключ ИИ не задан (OPENROUTER_API_KEY)'; return ai; }
+  const fresh = ai.v && now - ai.t < AI_TTL;
+  const newNews = news.src === 'FinancialJuice' && news.items.some(i => !ai.seen.has(i.title));
+  const due = !fresh || (newNews && now - ai.tryT >= AI_MIN_GAP);
+  if (due && now >= ai.backoff && !aiJob) aiJob = runAi().finally(() => { aiJob = null; });
+  if (aiJob && !(ai.v && now - ai.t < AI_MAX_AGE)) await aiJob;   // старого результата нет: ждём; иначе обновляем в фоне
+  return ai;
+}
+
 const sigCache = new Map(), sigJobs = new Map();
 async function signal(id) {
-  const hit = sigCache.get(id);
-  if (hit && Date.now() - hit.t < 60000) return hit.v;
+  const st = CORE.includes(id) ? await aiBatch() : ai, base = { news: { src: news.src, updated: news.t, count: news.items.length, error: news.err }, aiError: st.err, t: Date.now() };
+  if (CORE.includes(id) && st.v && st.v[id] && Date.now() - st.t < AI_MAX_AGE) {
+    const r = st.v[id];
+    return Object.assign({ id, status: r.status, side: r.status === 'ПОКУПАТЬ' ? 1 : r.status === 'ПРОДАВАТЬ' ? -1 : 0, confidence: r.confidence, reason: r.reason, source: st.source, model: st.model, aiUpdated: st.t }, base);
+  }
+  const hit = sigCache.get(id);                       // запасной путь: встроенный анализатор
+  if (hit && Date.now() - hit.t < 60000) return Object.assign({}, hit.v, { aiError: st.err });
   if (sigJobs.has(id)) return sigJobs.get(id);
   const job = (async () => {
     const snap = await snapshot(id);
     if (!snap[id]) throw new Error('нет котировки ' + id);
-    let r = null, source = 'rules';
-    const errs = [];
-    if (process.env.OPENROUTER_API_KEY) { try { r = await askOpenRouter(id, snap); source = 'openrouter'; } catch (e) { errs.push('OpenRouter: ' + e.message); } }
-    if (!r && process.env.GROQ_API_KEY) { try { r = await groqSignal(id, snap); source = 'groq'; } catch (e) { errs.push('Groq: ' + e.message); } }
-    if (!process.env.OPENROUTER_API_KEY && !process.env.GROQ_API_KEY) errs.push('ключ ИИ не задан (OPENROUTER_API_KEY)');
-    errs.forEach(e => console.warn('ИИ недоступен, работает встроенный анализатор:', e));
-    if (!r) r = await localSignal(id, snap);
-    const v = { id, status: r.status, side: r.status === 'ПОКУПАТЬ' ? 1 : r.status === 'ПРОДАВАТЬ' ? -1 : 0, confidence: r.confidence, reason: r.reason, source, model: r.model || null, aiError: errs.length ? errs.join(' | ').slice(0, 900) : null,
-      news: { src: news.src, updated: news.t, count: news.items.length, error: news.err }, t: Date.now() };
+    const r = await localSignal(id, snap);
+    const v = Object.assign({ id, status: r.status, side: r.status === 'ПОКУПАТЬ' ? 1 : r.status === 'ПРОДАВАТЬ' ? -1 : 0, confidence: r.confidence, reason: r.reason, source: 'rules', model: null, aiUpdated: st.t || null }, base);
     sigCache.set(id, { t: Date.now(), v });
     return v;
   })().finally(() => sigJobs.delete(id));
