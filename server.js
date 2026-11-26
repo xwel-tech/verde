@@ -185,7 +185,7 @@ const AI_MAX_AGE = 60 * 60 * 1000;      // если обновить не уда
 const AI_BACKOFF = 5 * 60 * 1000;       // после неудачи ИИ не дёргаем 5 минут
 const AI_DAILY_MAX = 45;                // запас под лимит OpenRouter (50 запросов в сутки), считаются и запросы к запасным моделям
 // openrouter/free сам выбирает свободную рабочую модель; остальные: запасные
-const MODELS = ['openrouter/free', 'meta-llama/llama-3.3-70b-instruct:free', 'google/gemini-2.0-flash-exp:free'];
+const MODELS = ['openrouter/free', 'qwen/qwen3-next-80b-a3b-instruct:free', 'nvidia/nemotron-3-nano-30b-a3b:free'];
 const ALIAS = { dxy: ['dxy'], eurusd: ['eurusd', 'eur/usd'], xau: ['xau', 'xauusd', 'xau/usd', 'gold'], brent: ['brent'], btc: ['btc', 'btcusd', 'btc/usd'] };
 const AI_FILE = path.join(__dirname, 'ai-cache.json');   // кэш переживает перезапуск сервера
 
@@ -249,7 +249,7 @@ async function askOpenRouter(snap) {
       const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: { Authorization: 'Bearer ' + process.env.OPENROUTER_API_KEY, 'Content-Type': 'application/json', 'HTTP-Referer': 'http://localhost:3000', 'X-Title': 'Verde' },
-        body: JSON.stringify({ model, messages, temperature: .2, max_tokens: 1200 }),   // без response_format: часть бесплатных моделей отвечает на него ошибкой 400
+        body: JSON.stringify({ model, messages, temperature: .2, max_tokens: 2500, reasoning: { max_tokens: 300 } }),   // reasoning ограничен, чтобы thinking-модель не съела весь лимит до JSON; без response_format: часть бесплатных моделей отвечает на него ошибкой 400
         signal: AbortSignal.timeout(20000)
       });
       const raw = await r.text();
