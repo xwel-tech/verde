@@ -67,6 +67,16 @@ svg{display:block;width:100%;height:auto}
 label{display:block;color:var(--mute);font-size:12.5px;margin-top:10px}
 .hl{display:block;text-decoration:none;color:inherit}
 .cbox{position:relative;height:320px}
+.chead{display:flex;justify-content:space-between;align-items:center;gap:8px 14px;flex-wrap:wrap;margin-bottom:10px}.chead h2{margin:0}
+.cdl{position:absolute;inset:0;touch-action:pan-y;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;cursor:crosshair}
+.cdl svg{height:100%}.cdl text{font-family:inherit;font-variant-numeric:tabular-nums}
+.cdl .ax{fill:var(--mute);font-size:11px;font-weight:500}
+.cdl .lc{font-size:10.5px;font-weight:700;paint-order:stroke;stroke:var(--panel);stroke-width:3px;stroke-linejoin:round}
+.cdl .pt{font-size:11px;font-weight:700;text-anchor:middle}
+.cd.in{transform-box:fill-box;transform-origin:50% 100%;animation:cin .6s cubic-bezier(.2,.7,.2,1) both;animation-delay:calc(var(--i)*22ms)}@keyframes cin{from{opacity:0;transform:scaleY(.6)}}
+.ctip{position:absolute;z-index:3;pointer-events:none;min-width:148px;padding:9px 12px 10px;background:#0a120df2;border:1px solid #2bd67b44;border-radius:12px;box-shadow:0 10px 28px #000b;backdrop-filter:blur(8px);font-size:12.5px;line-height:1.5}
+.ctip[hidden]{display:none}.ctip time{display:block;color:var(--mute);font-size:11.5px;font-weight:600;margin-bottom:3px}
+.ctip div{display:flex;justify-content:space-between;gap:18px}.ctip div span{color:var(--mute)}.ctip div b{font-weight:700}
 .tr{display:grid;grid-template-columns:1fr auto auto;gap:10px;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}.tr:last-child{border:0}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:99px;padding:2px;background:var(--panel)}.seg button{font:inherit;font-size:12px;font-weight:700;color:var(--mute);background:none;border:0;border-radius:99px;padding:5px 12px;min-height:32px;cursor:pointer}.seg button.on{background:var(--g3);color:#fff}
 .nw{display:grid;grid-template-columns:64px 1fr;gap:12px;padding:10px 0 10px 10px;border-bottom:1px solid var(--line);border-left:2px solid transparent}.nw.new{border-left-color:var(--g1)}.nw:last-child{border-bottom:0}
@@ -95,7 +105,7 @@ main{padding:18px 16px 96px}
 .sub{margin-bottom:18px}.cbox{height:260px}
 }
 @media(max-width:380px){.tiles{grid-template-columns:1fr}}
-@media(prefers-reduced-motion:reduce){*{transition:none!important}.ld{animation:none}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}.ld,.cd.in{animation:none}}
 </style>
 </head>
 <body>
@@ -128,8 +138,9 @@ const $=id=>document.getElementById(id);
 /* ---------- состояние ---------- */
 let curr='USD',cur='eurusd',cat='all',qs='',favs=['dxy','eurusd','xau','brent','btc'],st={sl:.5,t1:.8,t2:1.5,dep:10000,risk:1,iv:'15m'};
 let net={s:'load',t:0},post=null,ch=null;
-try{const sv=JSON.parse(localStorage.getItem('verde2'));if(sv){if(AM[sv.c])cur=sv.c;if(sv.f)favs=sv.f;if(sv.u=='RUB')curr='RUB';Object.assign(st,sv.s||{})}}catch(e){}
-function save(){try{localStorage.setItem('verde2',JSON.stringify({c:cur,f:favs,s:st,u:curr}))}catch(e){}}
+let vw='c',selC=null,cdKey='',cro=null,hideC=null,lastR='';const cFail={};   // вид графика (c: свечи, l: линия), выбранная свеча, ключ анимации, наблюдатель размера
+try{const sv=JSON.parse(localStorage.getItem('verde2'));if(sv){if(AM[sv.c])cur=sv.c;if(sv.f)favs=sv.f;if(sv.u=='RUB')curr='RUB';if(sv.v=='l')vw='l';Object.assign(st,sv.s||{})}}catch(e){}
+function save(){try{localStorage.setItem('verde2',JSON.stringify({c:cur,f:favs,s:st,u:curr,v:vw}))}catch(e){}}
 
 /* ---------- слой данных: кэш в памяти (котировки 15 с, история 60 с) ---------- */
 const TTLQ=15000,TTLH=60000,C={},F={};
@@ -142,6 +153,10 @@ function getQ(ids){const need=ids.filter(i=>!age('q:'+i,TTLQ));if(!need.length)r
 function getH(id){const k='h:'+id+st.iv;if(age(k,TTLH))return Promise.resolve();
   return once(k,()=>J('/api/history?id='+id+'&iv='+st.iv).then(o=>{C[k]={t:Date.now(),v:o}}))}
 const Q=id=>C['q:'+id]&&C['q:'+id].v;
+const TTLC=15000;   // свечи: последняя свеча обновляется вместе с котировками, каждые 15 с
+function getC(ids){const nd=ids.filter(i=>!age('c:'+i+st.iv,TTLC));if(!nd.length)return Promise.resolve();
+  return once('c'+st.iv+nd.join(),()=>J('/api/candles?iv='+st.iv+'&ids='+nd.join(',')).then(o=>nd.forEach(i=>{const k=i+st.iv;if(o[i]&&o[i].candles&&o[i].candles.length){C['c:'+k]={t:Date.now(),v:o[i]};delete cFail[k]}else cFail[k]=1}),e=>{nd.forEach(i=>{cFail[i+st.iv]=1});throw e}))}
+const CD=id=>{const c=C['c:'+id+st.iv];return c&&c.v.candles&&c.v.candles.length?c.v.candles:null};
 const TTLN=30000,TTLS=60000;
 const getN=()=>age('n',TTLN)?Promise.resolve():once('n',()=>J('/api/news').then(o=>{C.n={t:Date.now(),v:o}}));
 const getS=id=>age('s:'+id,TTLS)?Promise.resolve():once('s:'+id,()=>J('/api/signal?id='+id).then(o=>{C['s:'+id]={t:Date.now(),v:o}}));
@@ -155,7 +170,8 @@ function need(r){let q=[cur,'dxy','brent'],h=[cur,'dxy','brent'];
   if(r=='menu'||r=='settings'){q=[];h=[]}
   if(r=='dxy'){q=['dxy'];h=['dxy']}
   if(r=='brent'){q=['brent'];h=['brent']}
-  return{q:uniq(q.length?q.concat('usdrub'):q),h:uniq(h),n:r=='home'||r=='signal',s:['home','signal','entry','risk','history'].includes(r)?[cur]:[]}}
+  const c=r=='home'?[cur,'dxy','brent']:['signal','entry','risk','patterns'].includes(r)?[cur]:r=='dxy'||r=='brent'?[r]:[];
+  return{q:uniq(q.length?q.concat('usdrub'):q),h:uniq(h),n:r=='home'||r=='signal',s:['home','signal','entry','risk','history'].includes(r)?[cur]:[],c:uniq(c)}}
 
 /* ---------- математика и анализ ---------- */
 const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
@@ -200,8 +216,11 @@ function macro(id){const o={dm:null,bm:null,c1:null,c2:null,v:0};let num=0,den=0
 function sigOf(id){const q=Q(id);if(!q)return null;const a=AM[id],c=closes(id),pl=c.length>=24?patterns(c,v=>P(id,v)):[];
   const mom=clamp(po(id)/sig(id),-1,1),pat=pl.length?clamp(mean(pl.map(x=>x.b)),-1,1):0,mac=macro(id);
   const tot=mom*.4+pat*.3+mac.v*.3,tside=tot>=.2?1:tot<=-.2?-1:0,sv=Sg(id),side=sv?sv.side:tside,conf=sv?sv.confidence:Math.round(Math.min(95,35+Math.abs(tot)*120));
-  const p=q.price,s=side||1;
-  return{id,a,q,c,pl,mom,pat,mac,tot,tside,sv,side,conf,k:side>0?'b':side<0?'s':'w',sg:sig(id),lv:{e:p,sl:p*(1-s*st.sl/100),t1:p*(1+s*st.t1/100),t2:p*(1+s*st.t2/100)}}}
+  const p=q.price,s=side||1,L0=sv&&sv.levels,   // уровни ИИ берём, пока они логичны и цена не ушла за стоп или первый тейк; иначе проценты из настроек
+    al=L0&&side&&s*(L0.entry-L0.stop)>0&&s*(L0.tp1-L0.entry)>0&&s*(p-L0.stop)>0&&s*(L0.tp1-p)>0?L0:null,
+    lv=al?{e:al.entry,sl:al.stop,t1:al.tp1,t2:al.tp2}:{e:p,sl:p*(1-s*st.sl/100),t1:p*(1+s*st.t1/100),t2:p*(1+s*st.t2/100)},
+    pp={sl:Math.abs(lv.sl/lv.e-1)*100,t1:Math.abs(lv.t1/lv.e-1)*100,t2:Math.abs(lv.t2/lv.e-1)*100};
+  return{id,a,q,c,pl,mom,pat,mac,tot,tside,sv,side,conf,k:side>0?'b':side<0?'s':'w',sg:sig(id),lv,pp,lvAi:!!al}}
 function levelsAt(e,side){const s=side||1;return{e,sl:e*(1-s*st.sl/100),t1:e*(1+s*st.t1/100),t2:e*(1+s*st.t2/100)}}
 function srOf(c,p,sg){if(c.length<12)return null;const k=Math.max(2,Math.round(c.length/30)),pv=pivots(c,k),lows=pv.lo.map(i=>c[i]).filter(v=>v<p),highs=pv.hi.map(i=>c[i]).filter(v=>v>p);
   return{sup:lows.length?Math.max(...lows):Math.min(...c),res:highs.length?Math.min(...highs):Math.max(...c)}}
@@ -245,19 +264,72 @@ function mini(v,up){if(!v||v.length<2)return `<svg viewBox='0 0 100 28' preserve
 function qk(id){const q=Q(id);if(!q)return'w';const p=po(id);return Math.abs(p)<.05?'w':p>0?'b':'s'}
 function row(id){const a=AM[id],q=Q(id),f=favs.includes(id),k=qk(id);
   return `<div class='ar' tabindex='0' role='button' data-id='${id}'><button class='star${f?' on':''}' data-fav='${id}' aria-label='${f?'Убрать из избранного':'Добавить в избранное'}'>★</button><div class='an'><b>${a.n}</b><span>${a.t}<em class='${k}'>${q?SL[k]:'нет данных'}</em></span></div><div class='sp'>${mini(q&&q.spark,q?q.pct>=0:1)}</div><div class='ap'><b>${q?P(id,q.price):'—'}</b><span class='chg ${q&&q.pct<0?'dn':'up'}'>${q?pc(q.pct):''}</span></div></div>`}
-function cc(id,h,lv){const a=AM[id],q=Q(id),v=H(id)?closes(id):(q?q.spark:null);
-  return `<a href='#${h}' class='hl'><div class='card'><div class='row'><h2>${a.n}</h2><span class='chg ${q&&q.pct<0?'dn':'up'}'>${q?pc(q.pct):'—'}</span></div>${svgChart(v,id,lv)}</div></a>`}
+function cc(id,h,lv){const a=AM[id],q=Q(id),v=H(id)?closes(id):(q?q.spark:null),cs=vw=='c'?CD(id):null;
+  return `<a href='#${h}' class='hl'><div class='card'><div class='row'><h2>${a.n}</h2><span class='chg ${q&&q.pct<0?'dn':'up'}'>${q?pc(q.pct):'—'}</span></div>${cs?miniCandles(cs,lv):svgChart(v,id,lv)}</div></a>`}
 function chipsBar(attr){return `<div class='chips'>${uniq(favs.concat([cur])).map(id=>`<button class='chip${id==cur?' on':''}' ${attr}='${id}'>${AM[id].t}</button>`).join('')}<a class='chip more' href='#assets'>Все активы</a></div>`}
-function chartCard(title,ok){return `<div class='card'><div class='row'><h2>${title}</h2><span class='note' style='margin:0'>таймфрейм ${st.iv}, 24 часа</span></div>${ok?`<div class='cbox'><canvas id='cv' aria-label='${title}'></canvas></div>`:`<p class='sub' style='margin:20px 0'>График появится, когда server.js отдаст историю.</p>`}</div>`}
+const vwSeg=m=>`<div class='seg' role='group' aria-label='Вид графика'><button data-vw='c' class='${m=='c'?'on':''}'>Свечи (20)</button><button data-vw='l' class='${m=='l'?'on':''}'>Линия</button></div>`;
+function chartCard(title,ok,mode,body,sub){const tg=mode?vwSeg(mode):`<span class='note' style='margin:0'>таймфрейм ${st.iv}, 24 часа</span>`;
+  return `<div class='card'><div class='chead'><h2>${title}</h2>${tg}</div>${sub?`<p class='note' style='margin:0 0 10px'>${sub}</p>`:''}${body||(ok?`<div class='cbox'><canvas id='cv' aria-label='${title}'></canvas></div>`:`<p class='sub' style='margin:20px 0'>График появится, когда server.js отдаст историю.</p>`)}</div>`}
 function mount(labels,sets){if(ch){ch.destroy();ch=null}const cv=$('cv');if(!cv)return;if(typeof Chart=='undefined'){cv.parentNode.innerHTML='<p class="sub">Chart.js не загрузился — проверьте интернет.</p>';return}
   const ctx=cv.getContext('2d'),g=ctx.createLinearGradient(0,0,0,300);g.addColorStop(0,'rgba(43,214,123,.3)');g.addColorStop(1,'rgba(43,214,123,0)');
   ch=new Chart(ctx,{type:'line',data:{labels,datasets:sets.map(s=>({label:s.l,data:s.d,borderColor:s.c||'#2bd67b',backgroundColor:s.f?g:'transparent',fill:!!s.f,borderWidth:s.w||2,borderDash:s.dash||[],pointRadius:s.pr||0,pointBackgroundColor:s.c||'#2bd67b',showLine:s.show!==false,tension:.2}))},
     options:{responsive:true,maintainAspectRatio:false,animation:false,interaction:{intersect:false,mode:'index'},plugins:{legend:{display:sets.length>1,labels:{color:'#7f9a8a',boxWidth:12}}},scales:{x:{ticks:{color:'#7f9a8a',maxTicksLimit:8},grid:{color:'#1b3126'}},y:{ticks:{color:'#7f9a8a'},grid:{color:'#1b3126'}}}}})}
 const flat=(n,v)=>Array(n).fill(v);
-function priceChart(id,extra){const h=H(id);if(h)post=()=>mount(h.map(p=>tm(p[0])),[{l:AM[id].t,d:h.map(p=>cv(id,p[1])),f:1}].concat((extra||[]).map(e=>({l:e.l,d:flat(h.length,cv(id,e.v)),c:e.c,dash:e.dash?[6,5]:[],w:1.6}))));return chartCard('График за 24 часа — '+AM[id].t+unit(id),!!h)}
+/* ---------- свечной график: SVG, последние 20 свечей, тултип, линии входа / стопа / тейков ---------- */
+const BULL='#2bd67b',BEAR='#e5604d',GRID='#1b3126';
+const killRo=()=>{if(cro){cro.disconnect();cro=null}};
+const pf=(id,n)=>fmt(n,curr=='RUB'&&isCv(id)&&rate()?(Math.abs(n)>=1000?0:2):AM[id].d);   // подпись уже пересчитанной цены без знака валюты
+const ink=c=>{const n=parseInt(String(c).slice(1),16),l=((n>>16)&255)*.299+((n>>8)&255)*.587+(n&255)*.114;return l<110?'#e6f5ec':'#04110a'};
+const dtm=t=>new Date(t*1000).toLocaleString('ru-RU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}).replace(',',' ·');
+function niceTicks(mn,mx,n){const rg=(mx-mn)||Math.abs(mx)*.001||1,raw=rg/n,p=Math.pow(10,Math.floor(Math.log10(raw))),f=raw/p,step=(f<1.5?1:f<3?2:f<7?5:10)*p,out=[];for(let v=Math.ceil(mn/step)*step;v<=mx+step*1e-6;v+=step)out.push(+v.toPrecision(12));return{ticks:out,step}}
+// шкала по свечам; уровни расширяют её, только если лежат рядом, иначе прижимаются к краю со стрелкой, чтобы свечи не сжимались
+function cScale(lo,hi,lv){const rg=(hi-lo)||Math.abs(hi)*.0005||1,lim=rg*1.6;let mn=lo,mx=hi;lv.forEach(v=>{if(v>=lo-lim&&v<=hi+lim){mn=Math.min(mn,v);mx=Math.max(mx,v)}});const pd=(mx-mn)*.08;return{mn:mn-pd,mx:mx+pd}}
+
+function miniCandles(cs,lv){const w=360,h=150,n=cs.length,sc=cScale(Math.min(...cs.map(c=>c.l)),Math.max(...cs.map(c=>c.h)),(lv||[]).map(l=>l.v)),sl=(w-12)/n,bw=clamp(sl*.6,3,14),
+    X=i=>6+sl*(i+.5),Y=v=>clamp(6+(sc.mx-v)/(sc.mx-sc.mn)*(h-12),3,h-3),f=v=>v.toFixed(1);
+  const body=cs.map((c,i)=>{const col=c.c>=c.o?BULL:BEAR,x=X(i),a=Y(c.o),b=Y(c.c);return `<line x1='${f(x)}' x2='${f(x)}' y1='${f(Y(c.h))}' y2='${f(Y(c.l))}' stroke='${col}' stroke-width='1.2' stroke-linecap='round'/><rect x='${f(x-bw/2)}' y='${f(Math.min(a,b))}' width='${f(bw)}' height='${f(Math.max(1.2,Math.abs(a-b)))}' rx='1.6' fill='${col}'/>`}).join('');
+  const ex=(lv||[]).map(l=>`<line x1='0' x2='${w}' y1='${f(Y(l.v))}' y2='${f(Y(l.v))}' stroke='${l.c}' stroke-dasharray='4 4' opacity='.85'/>`).join('');
+  return `<svg viewBox='0 0 ${w} ${h}' role='img' aria-label='Свечной график'>${body}${ex}</svg>`}
+
+function mountCandles(id,cs,extra){if(ch){ch.destroy();ch=null}killRo();const el=$('cdl');if(!el)return;
+  const D=cs.map(c=>({t:c.t,o:cv(id,c.o),h:cv(id,c.h),l:cv(id,c.l),c:cv(id,c.c)})),n=D.length,
+    LV=(extra||[]).filter(e=>e&&e.v!=null&&isFinite(e.v)).map(e=>({l:e.l,v:cv(id,e.v),c:e.c})),
+    key=id+st.iv+curr;let intro=key!==cdKey;cdKey=key;
+  function draw(){const W=Math.max(260,el.clientWidth),H=Math.max(200,el.clientHeight),sc=cScale(Math.min(...D.map(d=>d.l)),Math.max(...D.map(d=>d.h)),LV.map(l=>l.v)),mn=sc.mn,mx=sc.mx,
+      nt=niceTicks(mn,mx,H<300?4:5),dec=Math.max(0,Math.ceil(-Math.log10(nt.step)-1e-9)),lab=nt.ticks.map(v=>fmt(v,dec)),
+      R=Math.min(96,16+Math.max(5,...lab.map(x=>x.length),...LV.map(l=>pf(id,l.v).length+1))*6.8),Lm=6,T=10,B=24,pw=W-R-Lm,ph=H-T-B,sl=pw/n,bw=clamp(sl*.62,3,20),
+      X=i=>Lm+sl*(i+.5),Y=v=>T+(mx-v)/(mx-mn)*ph,yc=v=>clamp(Y(v),T+8,T+ph-8),f=v=>v.toFixed(1),
+      last=D[n-1],py=Y(last.c),tags=LV.map(l=>({l,y:yc(l.v),a:Y(l.v)<T+8?'▲ ':Y(l.v)>T+ph-8?'▼ ':''})),
+      showPT=py>=T&&py<=T+ph&&!tags.some(t=>Math.abs(t.y-py)<16),tys=tags.map(t=>t.y).concat(showPT?[py]:[]),tagX=Lm+pw+3,tagW=R-6;
+    let s='';
+    nt.ticks.forEach((v,i)=>{const y=Y(v);if(y<T||y>T+ph)return;s+=`<line x1='${Lm}' x2='${f(Lm+pw)}' y1='${f(y)}' y2='${f(y)}' stroke='${GRID}' opacity='.75'/>`;if(!tys.some(t=>Math.abs(t-y)<12))s+=`<text class='ax' x='${f(Lm+pw+8)}' y='${f(y+4)}'>${lab[i]}</text>`});
+    const every=Math.max(1,Math.ceil(n/Math.max(2,Math.floor(pw/62))));
+    D.forEach((d,i)=>{if((n-1-i)%every||X(i)<20)return;s+=`<line x1='${f(X(i))}' x2='${f(X(i))}' y1='${T}' y2='${T+ph}' stroke='${GRID}' opacity='.4'/><text class='ax' x='${f(X(i))}' y='${H-7}' text-anchor='middle'>${tm(d.t)}</text>`});
+    s+=`<rect class='hvr' x='0' y='${T}' width='${f(sl)}' height='${ph}' rx='6' fill='#7dffb3' fill-opacity='.07' style='display:none'/>`;
+    D.forEach((d,i)=>{const up=d.c>=d.o,col=up?BULL:BEAR,x=X(i),a=Y(d.o),b=Y(d.c);
+      s+=`<g class='cd${intro?' in':''}' style='--i:${i}'><line x1='${f(x)}' x2='${f(x)}' y1='${f(Y(d.h))}' y2='${f(Y(d.l))}' stroke='${col}' stroke-width='1.4' stroke-linecap='round'/><rect x='${f(x-bw/2)}' y='${f(Math.min(a,b))}' width='${f(bw)}' height='${f(Math.max(1.4,Math.abs(a-b)))}' rx='${f(Math.min(2.2,bw/3))}' fill='${col}' fill-opacity='.93'/></g>`});
+    tags.forEach(t=>{const l=t.l;s+=`<line x1='${Lm}' x2='${f(Lm+pw)}' y1='${f(t.y)}' y2='${f(t.y)}' stroke='${l.c}' stroke-width='1.3' stroke-dasharray='${/Вход|Точка/.test(l.l)?'7 4':'4 4'}' opacity='.95'/><text class='lc' x='${Lm+6}' y='${f(t.y-5)}' fill='${l.c}'>${esc(l.l)}</text><rect x='${f(tagX)}' y='${f(t.y-9)}' width='${f(tagW)}' height='18' rx='6' fill='${l.c}'/><text class='pt' x='${f(tagX+tagW/2)}' y='${f(t.y+4)}' fill='${ink(l.c)}'>${t.a}${pf(id,l.v)}</text>`});
+    if(showPT){const c2=last.c>=last.o?BULL:BEAR;s+=`<line x1='${Lm}' x2='${f(Lm+pw)}' y1='${f(py)}' y2='${f(py)}' stroke='${c2}' stroke-dasharray='1.5 3' opacity='.55'/><rect x='${f(tagX)}' y='${f(py-9)}' width='${f(tagW)}' height='18' rx='6' fill='${c2}'/><text class='pt' x='${f(tagX+tagW/2)}' y='${f(py+4)}' fill='${ink(c2)}'>${pf(id,last.c)}</text>`}
+    el.innerHTML=`<svg viewBox='0 0 ${W} ${H}' role='img' aria-label='Свечной график ${esc(AM[id].t)}, ${n} свечей'>${s}</svg><div class='ctip' hidden></div>`;
+    const tip=el.querySelector('.ctip'),hv=el.querySelector('.hvr'),hide=()=>{selC=null;tip.hidden=true;hv.style.display='none'};
+    function show(i){const d=D[i],r=cs[i],x=X(i);selC=d.t;hv.setAttribute('x',f(x-sl/2));hv.style.display='';
+      tip.innerHTML=`<time>${dtm(d.t)}</time><div><span>Откр</span><b>${P(id,r.o)}</b></div><div><span>Макс</span><b>${P(id,r.h)}</b></div><div><span>Мин</span><b>${P(id,r.l)}</b></div><div><span>Закр</span><b class='${d.c>=d.o?'up':'dn'}'>${P(id,r.c)}</b></div>`;
+      tip.hidden=false;const tw=tip.offsetWidth;let tx=x+bw/2+12;if(tx+tw>W-4)tx=x-bw/2-12-tw;tip.style.left=clamp(tx,4,W-tw-4)+'px';tip.style.top=(T+4)+'px'}
+    const at=e=>{const x=e.clientX-el.getBoundingClientRect().left;if(x<Lm||x>Lm+pw){if(e.pointerType=='mouse')hide();return}show(clamp(Math.floor((x-Lm)/sl),0,n-1))};
+    el.onpointermove=at;el.onpointerdown=at;el.onpointerleave=e=>{if(e.pointerType=='mouse')hide()};hideC=hide;
+    const k=selC!=null?D.findIndex(d=>d.t==selC):-1;if(k>=0)show(k);else selC=null;   // выбранная свеча переживает автообновление
+    intro=false}
+  draw();
+  if(typeof ResizeObserver!='undefined'){let ow=el.clientWidth,oh=el.clientHeight;cro=new ResizeObserver(()=>{if(el.clientWidth!==ow||el.clientHeight!==oh){ow=el.clientWidth;oh=el.clientHeight;draw()}});cro.observe(el)}}
+function priceChart(id,extra){const h=H(id),cs=CD(id),ttl=AM[id].t+unit(id);
+  if(vw=='c'&&cs){post=()=>mountCandles(id,cs,extra);return chartCard('Свечи — '+ttl,true,'c',`<div class='cbox'><div id='cdl' class='cdl'></div></div>`,`таймфрейм ${st.iv} · последние ${cs.length} свечей`)}
+  if(vw=='c'&&!cFail[id+st.iv])return chartCard('Свечи — '+ttl,false,'c',`<p class='sub' style='margin:20px 0'>Загружаем свечи…</p>`);
+  if(h)post=()=>mount(h.map(p=>tm(p[0])),[{l:AM[id].t,d:h.map(p=>cv(id,p[1])),f:1}].concat((extra||[]).map(e=>({l:e.l,d:flat(h.length,cv(id,e.v)),c:e.c,dash:e.dash?[6,5]:[],w:1.6}))));
+  return chartCard('График за 24 часа — '+ttl,!!h,'l',undefined,`таймфрейм ${st.iv}, 24 часа`)}
 function lvLines(x){return x&&x.side?[{l:'Вход',v:x.lv.e,c:'#7dffb3'},{l:'Стоп',v:x.lv.sl,c:'#e5604d',dash:1},{l:'Тейк 1',v:x.lv.t1,c:'#2bd67b',dash:1},{l:'Тейк 2',v:x.lv.t2,c:'#14803f',dash:1}]:[]}
 const L=(x,k)=>x&&x.side?P(x.id,x.lv[k]):'—';
-const rr=()=>`1:${(st.t1/st.sl).toFixed(1).replace('.',',')} – 1:${(st.t2/st.sl).toFixed(1).replace('.',',')}`;
+const pr=v=>String(+Number(v).toFixed(2)).replace('.',',');
+const rr=x=>{const p=x&&x.pp?x.pp:{sl:st.sl,t1:st.t1,t2:st.t2};return `1:${(p.t1/p.sl).toFixed(1).replace('.',',')} – 1:${(p.t2/p.sl).toFixed(1).replace('.',',')}`};
 
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function ago(ts){const m=Math.max(0,Math.round((Date.now()-ts)/60000));return m<1?'только что':m<60?m+' мин назад':Math.floor(m/60)+' ч назад'}
@@ -265,7 +337,7 @@ const srcLabel=x=>x&&x.sv?(x.sv.source=='openrouter'?'ИИ OpenRouter + ново
 function newsCard(n){const d=NW(),it=d&&d.items?d.items.slice(0,n):[];
   const body=it.length?it.map(i=>`<div class='nw${Date.now()-i.ts<300000?' new':''}'><time class='nt'>${new Date(i.ts).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}<small>${ago(i.ts)}</small></time><div><div class='ntx'>${esc(i.title)}</div><div class='ntg'>${i.tags.map(t=>`<span class='tg${t==AM[cur].t?' hit':''}'>${esc(t)}</span>`).join('')}<span class='src'>${esc(i.src)}</span></div></div></div>`).join(''):`<p class='sub' style='margin:0'>${d?'Новости пока недоступны: источники не ответили.':'Загружаем новости…'}</p>`;
   return `<div class='card' style='margin-top:16px'><div class='row'><h2><span class='ld'></span>Live-лента новостей</h2><span class='note' style='margin:0'>${d&&d.src?esc(d.src)+', ':''}обновление каждые 60 с</span></div>${body}</div>`}
-function reasonCard(x){const sv=x.sv;return `<div class='card' style='margin-top:16px'><div class='row'><h2>Обоснование</h2><span class='pill'>${sv?(sv.source=='openrouter'?'ИИ OpenRouter':sv.source=='groq'?'ИИ Groq':'Ключевые слова и корреляции'):'Технический расчёт'}</span></div><p>${esc(sv?sv.reason:'Решение по новостям ещё не получено, показан технический сигнал.')}</p></div>`}
+function reasonCard(x){const sv=x.sv;return `<div class='card' style='margin-top:16px'><div class='row'><h2>Обоснование</h2><span class='pill'>${sv?(sv.source=='openrouter'?'ИИ OpenRouter':sv.source=='groq'?'ИИ Groq':'Ключевые слова и корреляции'):'Технический расчёт'}</span></div><p>${esc(sv?sv.reason:'Решение по новостям ещё не получено, показан технический сигнал.')}</p>${sv?`<p class='note' style='margin:12px 0 0'>${sv.source=='rules'?'Анализатор':'ИИ'} учитывал новости и последние 20 свечей (${esc(sv.candlesIv||'15m')}): коридор, наклон тренда, положение цены, пробой или отскок, а не цвет последней свечи${x.lvAi?(sv.source=='rules'?'; вход, стоп и тейки рассчитаны по структуре свечей':'; вход, стоп и тейки рассчитаны им по структуре свечей'):sv.levels?'; уровни устарели, показаны уровни от текущей цены по настройкам':''}.</p>`:''}</div>`}
 
 /* ---------- экраны ---------- */
 function home(){const x=sigOf(cur),a=AM[cur],k=x?x.k:'w',D=dirOf('dxy'),B=dirOf('brent');
@@ -274,11 +346,11 @@ function home(){const x=sigOf(cur),a=AM[cur],k=x?x.k:'w',D=dirOf('dxy'),B=dirOf(
   return badge()+`<h1>Где лучше входить сейчас</h1><p class='sub'>Выберите актив. Сайт сверит его с DXY и Brent и покажет вход, тейк и стоп.</p>`+chipsBar('data-id')+
   `<div class='hero'><a href='#signal' class='hl'><div class='card sig ${k}'><div class='row'><span class='pill'>${x?title:'Загрузка'}</span><span style='color:var(--mute)'>${a.t}, ${st.iv}</span></div><div class='big' style='margin-top:16px'>${x?SG[k]:'—'}</div><p style='color:var(--mute);margin-top:6px'>${why}</p>
   <div class='lv'><div><span>Вход</span><b>${L(x,'e')}</b></div><div class='sl'><span>Стоп-лосс</span><b>${L(x,'sl')}</b></div><div class='tp'><span>Тейк 1</span><b>${L(x,'t1')}</b></div><div class='tp'><span>Тейк 2</span><b>${L(x,'t2')}</b></div></div></div></a>
-  <div class='card'><h2>Уверенность сигнала</h2><div class='row'><b style='font-size:34px;color:var(--g2)'>${x?x.conf+'%':'—'}</b><span style='color:var(--mute)'>риск/прибыль ${x&&x.side?rr():'—'}</span></div><div class='bar'><i style='width:${x?x.conf:0}%'></i></div>
+  <div class='card'><h2>Уверенность сигнала</h2><div class='row'><b style='font-size:34px;color:var(--g2)'>${x?x.conf+'%':'—'}</b><span style='color:var(--mute)'>риск/прибыль ${x&&x.side?rr(x):'—'}</span></div><div class='bar'><i style='width:${x?x.conf:0}%'></i></div>
   <div style='margin-top:14px'>${kv('Паттерн',x&&x.pl.length?x.pl[0].n:'—')}${kv('DXY',D[0],D[1])}${kv('Brent',B[0],B[1])}${kv('Анализ',srcLabel(x))}</div></div></div>`+
   `<div class='charts'>${cc(cur,'entry',x&&x.side?lvLines(x).map(l=>({v:l.v,c:l.c,dash:l.dash})):null)}${cc('dxy','dxy')}${cc('brent','brent')}</div>`+newsCard(8)+
   `<div class='row' style='margin-top:28px'><h2>Мои активы</h2><a href='#assets' style='color:var(--g1);font-weight:600;text-decoration:none'>Все активы</a></div><div class='list'>${favs.map(row).join('')||'<p class="sub">Добавьте активы в избранное звёздочкой.</p>'}</div>`+
-  `<h2 style='margin-top:28px'>Разделы</h2><div class='tiles'>${S.slice(2).map(s=>`<button class='tile' onclick="location.hash='${s[0]}'"><b>${s[1]}</b><span>${s[3]}</span></button>`).join('')}</div><p class='note'>Данные: Yahoo Finance через server.js, обновление каждые 15 секунд. Сигналы считаются по формуле сайта и не являются финансовой рекомендацией.</p>`}
+  `<h2 style='margin-top:28px'>Разделы</h2><div class='tiles'>${S.slice(2).map(s=>`<button class='tile' onclick="location.hash='${s[0]}'"><b>${s[1]}</b><span>${s[3]}</span></button>`).join('')}</div><p class='note'>Данные: Yahoo Finance (свечи BTC — Binance) через server.js, обновление каждые 15 секунд. Сигналы считаются по формуле сайта и не являются финансовой рекомендацией.</p>`}
 
 function assets(){return badge()+`<h1>Активы</h1><p class='sub'>Нажмите на актив, чтобы увидеть по нему сигнал. Звёздочка добавляет актив в избранное на главной. Метка рядом с тикером показывает положение цены относительно открытия дня.</p><input id='qs' class='search' type='search' placeholder='Найти: золото, EUR/USD, нефть' aria-label='Поиск актива'><div class='chips'>${CATS.map(c=>`<button class='chip${c[0]==cat?' on':''}' data-cat='${c[0]}'>${c[1]}</button>`).join('')}</div><div id='alist' class='list'></div>`}
 function fillList(){const s=qs.toLowerCase(),l=A.filter(a=>(cat=='all'||(cat=='fav'?favs.includes(a[0]):a[3]==cat))&&(a[1]+' '+a[2]).toLowerCase().includes(s));$('alist').innerHTML=l.length?l.map(a=>row(a[0])).join(''):'<p class="sub">Ничего не найдено. Сбросьте фильтр или поиск.</p>'}
@@ -289,7 +361,7 @@ function pSignal(){const x=sigOf(cur);if(!x)return'<div class="card"><p class="s
   const ch1=priceChart(cur,lvLines(x));
   return ch1+`<div class='grid3'>${cd('Решение',`<div class='big ${x.k}'>${SG[x.k]}</div><div class='row' style='margin-top:10px'><span class='mute'>Уверенность</span><b>${x.conf}%</b></div><div class='bar'><i style='width:${x.conf}%'></i></div>`)}
   ${cd('Из чего сложился сигнал',kv('Импульс (цена к открытию дня)',sgn(x.mom),x.mom>=0?'up':'dn','вес 40%')+kv('Паттерн',sgn(x.pat),x.pat>=0?'up':'dn','вес 30%')+kv('DXY и Brent',sgn(x.mac.v),x.mac.v>=0?'up':'dn','вес 30%, с учётом корреляции')+kv('Технический итог',sgn(x.tot),x.tot>=0?'up':'dn','порог ±0,20'))}
-  ${cd('Уровни',kv('Вход',L(x,'e'))+kv('Стоп-лосс (−'+st.sl+'%)',L(x,'sl'),'dn')+kv('Тейк 1 (+'+st.t1+'%)',L(x,'t1'),'up')+kv('Тейк 2 (+'+st.t2+'%)',L(x,'t2'),'up')+kv('Риск/прибыль',x.side?rr():'—'))}</div>`+reasonCard(x)+newsCard(15)}
+  ${cd('Уровни',kv('Вход',L(x,'e'),'',x.lvAi?(x.sv&&x.sv.source=='rules'?'рассчитан по структуре 20 свечей':'рассчитан ИИ по свечам'):'')+kv('Стоп-лосс (−'+pr(x.pp.sl)+'%)',L(x,'sl'),'dn')+kv('Тейк 1 (+'+pr(x.pp.t1)+'%)',L(x,'t1'),'up')+kv('Тейк 2 (+'+pr(x.pp.t2)+'%)',L(x,'t2'),'up')+kv('Риск/прибыль',x.side?rr(x):'—'))}</div>`+reasonCard(x)+newsCard(15)}
 
 function pEntry(){const x=sigOf(cur);if(!x)return'<div class="card"><p class="sub">Нет данных по активу.</p></div>';const e=entryOf(x),d=v=>P(x.id,v);
   const ex=e?[{l:'Поддержка',v:e.sup,c:'#2bd67b',dash:1},{l:'Сопротивление',v:e.res,c:'#e5604d',dash:1}].concat(e.e!=null?[{l:'Точка входа',v:e.e,c:'#7dffb3'}]:[]):[];
@@ -299,8 +371,8 @@ function pEntry(){const x=sigOf(cur);if(!x)return'<div class="card"><p class="su
   ${cd('Подтверждение',kv('DXY',D[0],D[1],c1==null?'':'корреляция '+fmt(c1,2))+kv('Brent',B[0],B[1],c2==null?'':'корреляция '+fmt(c2,2))+kv('Паттерн',x.pl.length?x.pl[0].n:'—'))}</div>`}
 
 function pRisk(){const x=sigOf(cur);if(!x)return'<div class="card"><p class="sub">Нет данных по активу.</p></div>';const ok=x.side!=0,okp=ok&&isCv(x.id),rs=st.dep*st.risk/100,dist=Math.abs(x.lv.e-x.lv.sl),u=dist?rs/dist:0;
-  return priceChart(cur,lvLines(x))+`<div class='grid3'>${cd('Стоп-лосс',kv('Цена',L(x,'sl'),'dn')+kv('Расстояние','−'+st.sl+'%')+kv('Потеря при срабатывании',ok?'−'+M(rs):'—','dn',st.risk+'% от депозита '+M(st.dep)))}
-  ${cd('Тейк-профиты',kv('Тейк 1',L(x,'t1'),'up',ok?'прибыль '+M(rs*st.t1/st.sl):'')+kv('Тейк 2',L(x,'t2'),'up',ok?'прибыль '+M(rs*st.t2/st.sl):'')+kv('Риск/прибыль',ok?rr():'—'))}
+  return priceChart(cur,lvLines(x))+`<div class='grid3'>${cd('Стоп-лосс',kv('Цена',L(x,'sl'),'dn')+kv('Расстояние','−'+pr(x.pp.sl)+'%')+kv('Потеря при срабатывании',ok?'−'+M(rs):'—','dn',st.risk+'% от депозита '+M(st.dep)))}
+  ${cd('Тейк-профиты',kv('Тейк 1',L(x,'t1'),'up',ok?'прибыль '+M(rs*x.pp.t1/x.pp.sl):'')+kv('Тейк 2',L(x,'t2'),'up',ok?'прибыль '+M(rs*x.pp.t2/x.pp.sl):'')+kv('Риск/прибыль',ok?rr(x):'—'))}
   ${cd('Размер позиции',kv('Количество',okp?fmt(u,u>=100?0:3):'—','',x.a.t)+kv('Объём позиции',okp?M(u*x.lv.e):'—')+kv('Риск на сделку',st.risk+'%','','меняется в настройках'))}</div>`}
 
 function pPatterns(){const x=sigOf(cur);if(!x)return'<div class="card"><p class="sub">Нет данных по активу.</p></div>';const c=x.c,r=c.length>5?reg(c):null,tot=r?r.slope*c.length/r.my*100:null;
@@ -329,7 +401,7 @@ function pHist(){const bt=backtest(cur),h=H(cur);if(!bt||!h)return'<div class="c
   ${cd('Правило',`<p class='sub' style='margin:0'>Покупка, когда цена выше открытия дня, продажа, когда ниже. Сделка закрывается по тейку 1 (+${st.t1}%), по стопу (−${st.sl}%) или при смене сигнала.</p>`)}</div>`}
 
 function pSettings(){const o=['5m','15m','1h'].map(v=>`<option value='${v}'${v==st.iv?' selected':''}>${v}</option>`).join('');
-  return `<div class='grid3'>${cd('Таймфрейм',`<label for='s_iv'>Свечи для графиков, паттернов и корреляции</label><select id='s_iv' class='fld'>${o}</select><p class='note' style='margin-top:12px'>Источник: ${net.s=='bad'?'нет связи с server.js':'Yahoo Finance через server.js'}. Котировки обновляются каждые 15 секунд.</p>`)}
+  return `<div class='grid3'>${cd('Таймфрейм',`<label for='s_iv'>Свечи для графиков, паттернов и корреляции</label><select id='s_iv' class='fld'>${o}</select><p class='note' style='margin-top:12px'>Источник: ${net.s=='bad'?'нет связи с server.js':'Yahoo Finance через server.js, свечи BTC — Binance'}. Котировки обновляются каждые 15 секунд.</p>`)}
   ${cd('Стоп и тейки, % от цены',`<label for='s_sl'>Стоп-лосс</label><input id='s_sl' class='fld' type='number' step='0.05' min='0.05' value='${st.sl}'><label for='s_t1'>Тейк 1</label><input id='s_t1' class='fld' type='number' step='0.05' min='0.05' value='${st.t1}'><label for='s_t2'>Тейк 2</label><input id='s_t2' class='fld' type='number' step='0.05' min='0.05' value='${st.t2}'>`)}
   ${cd('Риск на сделку',`<label for='s_dep'>Депозит в долларах, $</label><input id='s_dep' class='fld' type='number' step='100' min='1' value='${st.dep}'><label for='s_risk'>Риск на сделку, % депозита</label><input id='s_risk' class='fld' type='number' step='0.1' min='0.1' max='100' value='${st.risk}'>`)}</div>`}
 
@@ -341,12 +413,12 @@ function page(s){const k=s[0],f={signal:pSignal,entry:pEntry,risk:pRisk,patterns
 function nav(c){$('nav').innerHTML='<div class="brand"><i></i>Верде</div><div style="padding:0 10px 14px">'+curBtn()+'</div>'+S.map((s,i)=>(i==1?'<hr>':'')+`<a href='#${s[0]}' class='${s[0]==c?'on':''}'>${s[1]}<small>${s[2]}</small></a>`).join('')}
 function tabs(c){const on=T.some(t=>t[0]==c)?c:'menu';$('tabs').innerHTML=T.map(t=>`<a href='#${t[0]}' class='${t[0]==on?'on':''}'><svg viewBox='0 0 24 24' aria-hidden='true'><path d='${t[2]}'/></svg>${t[1]}</a>`).join('')}
 function render(keep){const ae=document.activeElement;if(keep&&ae&&/INPUT|SELECT/.test(ae.tagName))return;
-  const r=route(),s=S.find(x=>x[0]==r)||['menu','Разделы'];post=null;nav(s[0]);tabs(s[0]);
+  const r=route(),s=S.find(x=>x[0]==r)||['menu','Разделы'];if(r!==lastR){cdKey='';selC=null;lastR=r}killRo();post=null;nav(s[0]);tabs(s[0]);
   $('ttl').textContent=s[0]=='home'?'Верде':s[1];$('live').className='live '+net.s;$('live').textContent={ok:'онлайн',load:'загрузка',bad:'нет связи'}[net.s];$('curb').innerHTML=curBtn();
   const y=window.scrollY;$('main').innerHTML=s[0]=='home'?home():s[0]=='menu'?menu():s[0]=='assets'?assets():page(s);
   if(post)post();if(s[0]=='assets')initAssets();window.scrollTo(0,keep?y:0)}
 function refresh(keep){const n=need(route());if(!n.q.length&&!n.h.length&&!n.n){render(keep);return Promise.resolve()}
-  const ex=[].concat(n.n?[getN()]:[],n.s.map(getS)).map(p=>p.catch(()=>{}));
+  const ex=[].concat(n.n?[getN()]:[],n.s.map(getS),n.c.length?[getC(n.c)]:[]).map(p=>p.catch(()=>{}));
   const main=Promise.all([getQ(n.q)].concat(n.h.map(getH))).then(()=>{net={s:n.q.length&&!n.q.some(Q)?'bad':'ok',t:Date.now()}},()=>{net.s='bad'});
   Promise.all(ex).then(()=>render(true));   // новости и сигнал могут идти дольше: цены не ждут
   return main.then(()=>render(keep))}
@@ -355,6 +427,7 @@ function pick(id){cur=id;save();if(route()=='home')go();else location.hash='home
 function tog(id){const i=favs.indexOf(id);if(i>-1)favs.splice(i,1);else favs.push(id);save();const y=window.scrollY;render();window.scrollTo(0,y)}
 
 document.addEventListener('click',e=>{const t=e.target,f=t.closest('[data-fav]');if(f){tog(f.dataset.fav);return}
+  const vb=t.closest('[data-vw]');if(vb){vw=vb.dataset.vw=='l'?'l':'c';selC=null;cdKey='';save();const y=window.scrollY;render();window.scrollTo(0,y);return}
   const cs=t.closest('[data-cs]');if(cs){curr=cs.dataset.cs;save();const y=window.scrollY;render();window.scrollTo(0,y);return}
   const c=t.closest('[data-cat]');if(c){cat=c.dataset.cat;render();return}
   const u=t.closest('[data-cur]');if(u){cur=u.dataset.cur;save();go();return}
@@ -362,6 +435,7 @@ document.addEventListener('click',e=>{const t=e.target,f=t.closest('[data-fav]')
 document.addEventListener('keydown',e=>{if(e.key=='Enter'&&e.target.classList&&e.target.classList.contains('ar'))pick(e.target.dataset.id)});
 document.addEventListener('change',e=>{const t=e.target;if(!t.id||t.id.indexOf('s_')!=0)return;const k=t.id.slice(2),v=k=='iv'?t.value:parseFloat(t.value);
   if(k=='iv'){st.iv=v}else if(v>0){st[k]=v}save();go()});
+document.addEventListener('pointerdown',e=>{if(hideC&&!e.target.closest('.cdl'))hideC()});
 window.addEventListener('hashchange',go);
 setInterval(()=>{if(!document.hidden)refresh(true)},15000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh(true)});
